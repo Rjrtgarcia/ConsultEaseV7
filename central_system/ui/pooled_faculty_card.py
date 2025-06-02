@@ -163,12 +163,29 @@ class PooledFacultyCard(QWidget):
         department = self.faculty_data.get('department', 'Unknown Department')
         self.department_label.setText(department)
 
-        # Update status
-        status = self.faculty_data.get('status', 'offline')
+        # Update status - handle both boolean and string status values
+        raw_status = self.faculty_data.get('status', 'offline')
+        
+        # Convert boolean status to string
+        if isinstance(raw_status, bool):
+            status = 'available' if raw_status else 'offline'
+        elif isinstance(raw_status, str):
+            status = raw_status
+        else:
+            # Fallback for any other type
+            status = 'offline'
+        
         self._update_status_indicator(status)
 
-        # Update button state
-        is_available = status.lower() == 'available'
+        # Update button state - check for availability
+        # Handle both 'available' field and converted status
+        is_available = False
+        if 'available' in self.faculty_data:
+            is_available = bool(self.faculty_data.get('available', False))
+        else:
+            # Fallback to status-based availability
+            is_available = status.lower() == 'available'
+        
         self.consult_button.setEnabled(is_available)
 
         if not is_available:
@@ -181,12 +198,20 @@ class PooledFacultyCard(QWidget):
         Update the status indicator color.
 
         Args:
-            status: Faculty status string
+            status: Faculty status (string or boolean)
         """
+        # Ensure status is a string and handle edge cases
+        if not isinstance(status, str):
+            if isinstance(status, bool):
+                status = 'available' if status else 'offline'
+            else:
+                status = str(status).lower() if status else 'offline'
+        
         status_colors = {
             'available': '#4CAF50',    # Green
             'busy': '#FF9800',         # Orange
             'offline': '#9E9E9E',      # Gray
+            'unavailable': '#9E9E9E',  # Gray
             'in_consultation': '#F44336'  # Red
         }
 
@@ -255,14 +280,29 @@ class PooledFacultyCard(QWidget):
         Update only the status of the faculty card.
 
         Args:
-            new_status: New status string
+            new_status: New status (string or boolean)
         """
         if self.faculty_data:
-            self.faculty_data['status'] = new_status
-            self._update_status_indicator(new_status)
+            # Handle both boolean and string status
+            if isinstance(new_status, bool):
+                status_str = 'available' if new_status else 'offline'
+                self.faculty_data['status'] = status_str
+                self.faculty_data['available'] = new_status  # Also update available field
+            elif isinstance(new_status, str):
+                status_str = new_status
+                self.faculty_data['status'] = status_str
+                # Update available field based on status string
+                self.faculty_data['available'] = status_str.lower() == 'available'
+            else:
+                # Fallback
+                status_str = 'offline'
+                self.faculty_data['status'] = status_str
+                self.faculty_data['available'] = False
+            
+            self._update_status_indicator(status_str)
 
             # Update button state
-            is_available = new_status.lower() == 'available'
+            is_available = self.faculty_data.get('available', False)
             self.consult_button.setEnabled(is_available)
 
             if not is_available:
