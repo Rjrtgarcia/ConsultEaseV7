@@ -214,6 +214,8 @@ class ConsultationController:
 
             if status == ConsultationStatus.ACCEPTED:
                 consultation.accepted_at = datetime.datetime.now()
+            elif status == ConsultationStatus.BUSY:
+                consultation.busy_at = datetime.datetime.now()
             elif status == ConsultationStatus.COMPLETED:
                 consultation.completed_at = datetime.datetime.now()
             elif status == ConsultationStatus.CANCELLED:

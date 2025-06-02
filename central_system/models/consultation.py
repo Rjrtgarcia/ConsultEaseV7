@@ -10,6 +10,7 @@ class ConsultationStatus(enum.Enum):
     """
     PENDING = "pending"
     ACCEPTED = "accepted"
+    BUSY = "busy"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
@@ -28,6 +29,7 @@ class Consultation(Base):
     status = Column(Enum(ConsultationStatus), default=ConsultationStatus.PENDING)
     requested_at = Column(DateTime, default=func.now())
     accepted_at = Column(DateTime, nullable=True)
+    busy_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -50,5 +52,6 @@ class Consultation(Base):
             "status": self.status.value,
             "requested_at": self.requested_at.isoformat() if self.requested_at else None,
             "accepted_at": self.accepted_at.isoformat() if self.accepted_at else None,
+            "busy_at": self.busy_at.isoformat() if self.busy_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         } 

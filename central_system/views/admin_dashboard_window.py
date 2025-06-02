@@ -2489,22 +2489,20 @@ class StudentDialog(QDialog):
         super().__init__(parent)
         self.student_id = student_id
         self.rfid_uid = ""
-        self.rfid_service = get_rfid_service()
-
-        # Set window flags to ensure dialog stays on top and has proper modal behavior
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-        self.setWindowModality(Qt.ApplicationModal)
-
-        # Track if we're currently scanning
         self.is_scanning = False
+        self.rfid_scan_dialog = None
+
+        # Get RFID service
+        from central_system.services import get_rfid_service
+        self.rfid_service = get_rfid_service()
 
         # Store a reference to our scan callback
         self.scan_callback = None
 
         self.init_ui()
 
-        # If we're in simulation mode, enable the simulate button
-        self.simulation_mode = os.environ.get('RFID_SIMULATION_MODE', 'true').lower() == 'true'
+        # If editing, the student data will be populated by the caller
+        # No need to fetch data here as it's passed in when the dialog is created
 
     def init_ui(self):
         """
@@ -2548,9 +2546,6 @@ class StudentDialog(QDialog):
         layout.addWidget(button_box)
 
         self.setLayout(layout)
-
-        # If editing, the student data will be populated by the caller
-        # No need to fetch data here as it's passed in when the dialog is created
 
     def scan_rfid(self):
         """
@@ -2643,6 +2638,12 @@ class StudentDialog(QDialog):
 
         # If all validations pass, accept the dialog
         super().accept()
+
+    def get_rfid_uid(self):
+        """
+        Get the scanned RFID UID.
+        """
+        return self.rfid_uid
 
 class RFIDScanDialog(QDialog):
     """
@@ -2821,14 +2822,17 @@ class RFIDScanDialog(QDialog):
         super().reject()
 
     def accept(self):
-        """Override accept to clean up callback"""
-        # Unregister callback to prevent memory leaks
-        if hasattr(self, 'callback_fn') and self.callback_fn:
-            try:
+        """
+        Accept the dialog.
+        """
+        # Unregister our callback
+        try:
+            if hasattr(self, 'callback_fn') and self.callback_fn:
                 self.rfid_service.unregister_callback(self.callback_fn)
-                logger.info("Unregistered RFID callback in RFIDScanDialog accept")
-            except Exception as e:
-                logger.error(f"Error unregistering RFID callback in accept: {str(e)}")
+                self.callback_fn = None
+                logger.info("Unregistered RFID callback in accept")
+        except Exception as e:
+            logger.error(f"Error unregistering RFID callback in accept: {str(e)}")
         super().accept()
 
     def simulate_scan(self):

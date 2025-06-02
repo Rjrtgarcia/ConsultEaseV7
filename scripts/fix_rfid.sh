@@ -125,7 +125,6 @@ cat > .env << EOF
 
 # RFID Configuration
 RFID_DEVICE_PATH=$DEVICE_PATH
-RFID_SIMULATION_MODE=false
 
 # Debug mode
 DEBUG=true

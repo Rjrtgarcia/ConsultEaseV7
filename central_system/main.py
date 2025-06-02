@@ -32,25 +32,16 @@ from central_system.controllers import (
 from central_system.services.async_mqtt_service import get_async_mqtt_service
 
 # Import views
-from central_system.views import (
-    LoginWindow,
-    DashboardWindow,
-    AdminLoginWindow,
-    AdminDashboardWindow
-)
-
-# Import the keyboard setup script generator
-from central_system.views.login_window import create_keyboard_setup_script
+from central_system.views.login_window import LoginWindow
+from central_system.views.dashboard_window import DashboardWindow
+from central_system.views.admin_login_window import AdminLoginWindow
+from central_system.views.admin_dashboard_window import AdminDashboardWindow
 
 # Import utilities
 from central_system.utils import (
     apply_stylesheet,
-    WindowTransitionManager,
-    get_keyboard_manager,
-    install_keyboard_manager
+    WindowTransitionManager
 )
-# Import direct keyboard integration
-from central_system.utils.direct_keyboard import get_direct_keyboard
 # Import theme system
 from central_system.utils.theme import ConsultEaseTheme
 # Import icons module separately to avoid early QPixmap creation
@@ -89,31 +80,6 @@ class ConsultEaseApp:
                 logger.info(f"Applied fallback {theme} theme stylesheet")
             except Exception as e2:
                 logger.error(f"Failed to apply fallback stylesheet: {e2}")
-
-        # Create keyboard setup script for Raspberry Pi
-        try:
-            script_path = create_keyboard_setup_script()
-            logger.info(f"Created keyboard setup script at {script_path}")
-        except Exception as e:
-            logger.error(f"Failed to create keyboard setup script: {e}")
-
-        # Initialize unified keyboard manager for touch input
-        try:
-            self.keyboard_handler = get_keyboard_manager()
-            # Install keyboard manager to handle focus events
-            install_keyboard_manager(self.app)
-            logger.info(f"Initialized keyboard manager with {self.keyboard_handler.active_keyboard} keyboard")
-        except Exception as e:
-            logger.error(f"Failed to initialize keyboard manager: {e}")
-            self.keyboard_handler = None
-
-        # Initialize direct keyboard integration as a fallback
-        try:
-            self.direct_keyboard = get_direct_keyboard()
-            logger.info(f"Initialized direct keyboard integration with {self.direct_keyboard.keyboard_type} keyboard")
-        except Exception as e:
-            logger.error(f"Failed to initialize direct keyboard integration: {e}")
-            self.direct_keyboard = None
 
         # Validate hardware before proceeding
         logger.info("Performing hardware validation...")
@@ -197,7 +163,7 @@ class ConsultEaseApp:
         try:
             from .services import get_rfid_service
             rfid_service = get_rfid_service()
-            logger.info(f"RFID service initialized: {rfid_service}, simulation mode: {rfid_service.simulation_mode}")
+            logger.info(f"RFID service initialized: {rfid_service}")
 
             # Log registered callbacks
             logger.info(f"RFID service callbacks: {len(rfid_service.callbacks)}")
@@ -1117,9 +1083,6 @@ if __name__ == "__main__":
 
     # Set environment variables if needed
     import os
-
-    # Configure RFID - enable simulation mode since we're on Raspberry Pi
-    os.environ['RFID_SIMULATION_MODE'] = 'true'  # Enable if no RFID reader available
 
     # Set the theme to light as per the technical context document
     os.environ['CONSULTEASE_THEME'] = 'light'

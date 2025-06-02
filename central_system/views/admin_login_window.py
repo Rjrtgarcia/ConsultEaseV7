@@ -238,108 +238,23 @@ class AdminLoginWindow(BaseWindow):
 
     def showEvent(self, event):
         """
-        Override showEvent to trigger the keyboard and check for first-time setup.
+        Override showEvent to check for first-time setup.
         """
         super().showEvent(event)
 
-        # Import necessary modules at the beginning
-        import logging
-        import subprocess
-        import sys
-        from PyQt5.QtWidgets import QApplication
-
-        # Clear any previous inputs
-        self.username_input.clear()
-        self.password_input.clear()
-        self.error_label.setVisible(False)
-
-        # Check for first-time setup (using QTimer from top-level imports)
-        QTimer.singleShot(100, self.check_first_time_setup)
-
-        logger = logging.getLogger(__name__)
-        logger.info("AdminLoginWindow shown, triggering keyboard")
-
-        # Get the keyboard handler from the main application
-        keyboard_handler = None
+        # Check for first-time setup
         try:
-            # Try to get the keyboard handler from the main application
-            main_app = QApplication.instance()
-            if hasattr(main_app, 'keyboard_handler'):
-                keyboard_handler = main_app.keyboard_handler
-                logger.info("Found keyboard handler in main application")
-        except Exception as e:
-            logger.error(f"Error getting keyboard handler: {str(e)}")
-
-        # Make sure the input fields have the keyboard property set
-        self.username_input.setProperty("keyboardOnFocus", True)
-        self.password_input.setProperty("keyboardOnFocus", True)
-
-        # Focus the username input to trigger the keyboard
-        self.username_input.setFocus()
-
-        # Try to force show the keyboard using the handler
-        if keyboard_handler:
-            logger.info("Using keyboard handler to force show keyboard")
-            # Try multiple times with delays to ensure it appears
-            keyboard_handler.force_show_keyboard()
-
-            # Schedule another attempt after a short delay
-            QTimer.singleShot(500, keyboard_handler.force_show_keyboard)
-        else:
-            # Fallback to direct DBus call
-            logger.info("No keyboard handler found, using direct DBus call")
-            try:
-                if sys.platform.startswith('linux'):
-                    # Try to use dbus-send to force the keyboard with multiple attempts
-                    cmd = [
-                        "dbus-send", "--type=method_call", "--dest=sm.puri.OSK0",
-                        "/sm/puri/OSK0", "sm.puri.OSK0.SetVisible", "boolean:true"
-                    ]
-                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    logger.info("Sent dbus command to show squeekboard")
-
-                    # Try again after a delay
-                    QTimer.singleShot(500, lambda: subprocess.Popen(cmd,
-                                                                  stdout=subprocess.DEVNULL,
-                                                                  stderr=subprocess.DEVNULL))
-            except Exception as e:
-                logger.error(f"Error showing keyboard: {str(e)}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-
-    def check_first_time_setup(self):
-        """
-        Check if this is a first-time setup and show account creation dialog if needed.
-        """
-        try:
-            logger.info("🔍 Checking for first-time setup...")
-
-            if not self.admin_controller:
-                logger.warning("⚠️  No admin controller available for first-time setup check")
-                return
-
-            # Force refresh the admin accounts check to ensure accurate detection
-            accounts_exist = self.admin_controller.check_admin_accounts_exist(force_refresh=True)
-            logger.info(f"📊 Admin accounts exist: {accounts_exist}")
-
-            # Check if first-time setup is needed using the direct method
-            is_first_time = not accounts_exist
-            logger.info(f"🎯 Is first-time setup: {is_first_time}")
-
-            if is_first_time:
-                logger.info("✅ First-time setup detected - no admin accounts found")
-                logger.info("🎭 Showing first-time setup dialog...")
-                self.show_first_time_setup_dialog()
+            if self.admin_controller.is_first_time_setup():
+                logger.info("First-time setup detected, showing setup dialog")
+                self.show_first_time_setup()
             else:
-                logger.info("📋 Admin accounts exist - first-time setup not needed")
-
+                logger.info("Existing admin accounts found, showing normal login")
         except Exception as e:
-            logger.error(f"❌ Error checking first-time setup: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            # Continue with normal login if check fails
+            logger.error(f"Error checking first-time setup: {str(e)}")
+            # If there's an error, assume normal login
+            logger.info("Error occurred, defaulting to normal login")
 
-    def show_first_time_setup_dialog(self):
+    def show_first_time_setup(self):
         """
         Show the first-time setup dialog for creating an admin account.
         """

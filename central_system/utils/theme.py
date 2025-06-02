@@ -25,6 +25,7 @@ class ConsultEaseTheme:
     # Status colors with improved contrast
     STATUS_PENDING = "#f39c12"      # Darker amber for better contrast
     STATUS_ACCEPTED = "#27ae60"     # Darker green
+    STATUS_BUSY = "#ff9800"         # Orange for busy status
     STATUS_COMPLETED = "#2980b9"    # Darker blue
     STATUS_CANCELLED = "#c0392b"    # Darker red
 

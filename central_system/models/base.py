@@ -346,41 +346,57 @@ def _create_performance_indexes():
             # Composite indexes for common query patterns
             "CREATE INDEX IF NOT EXISTS idx_consultation_student_status ON consultations(student_id, status);",
             "CREATE INDEX IF NOT EXISTS idx_consultation_faculty_status ON consultations(faculty_id, status);",
-            "CREATE INDEX IF NOT EXISTS idx_faculty_status_department ON faculty(status, department);",
+            "CREATE INDEX IF NOT EXISTS idx_consultation_requested_at ON consultations(requested_at);",
 
-            # Additional performance indexes for Raspberry Pi optimization
-            "CREATE INDEX IF NOT EXISTS idx_consultation_faculty_requested_at ON consultations(faculty_id, requested_at);",
-            "CREATE INDEX IF NOT EXISTS idx_consultation_status_created_at ON consultations(status, created_at);",
-            "CREATE INDEX IF NOT EXISTS idx_faculty_ble_status ON faculty(ble_id, status);",
-            "CREATE INDEX IF NOT EXISTS idx_student_department_name ON students(department, name);",
-            "CREATE INDEX IF NOT EXISTS idx_consultation_student_created_at ON consultations(student_id, created_at);",
-
-            # Covering indexes for frequently accessed data
-            "CREATE INDEX IF NOT EXISTS idx_faculty_status_cover ON faculty(status) INCLUDE (name, department, ble_id);",
-            "CREATE INDEX IF NOT EXISTS idx_consultation_active_cover ON consultations(status, faculty_id) INCLUDE (student_id, request_message, requested_at) WHERE status IN ('pending', 'accepted');",
-
-            # Partial indexes for active records only
-            "CREATE INDEX IF NOT EXISTS idx_faculty_active ON faculty(id, name, department) WHERE status = true;",
-            "CREATE INDEX IF NOT EXISTS idx_consultation_pending ON consultations(faculty_id, requested_at) WHERE status = 'pending';",
-            "CREATE INDEX IF NOT EXISTS idx_admin_active ON admins(username, last_login) WHERE is_active = true;",
+            # New indexes for enhanced consultation features
+            "CREATE INDEX IF NOT EXISTS idx_consultation_busy_at ON consultations(busy_at);",
         ]
 
-        # Execute index creation
+        # Execute each index creation
         for index_sql in indexes:
             try:
                 db.execute(index_sql)
-                logger.debug(f"Created index: {index_sql.split()[5]}")  # Extract index name
+                logger.debug(f"Created index: {index_sql}")
             except Exception as e:
-                # Log but don't fail - indexes might already exist
-                logger.debug(f"Index creation skipped (likely already exists): {e}")
+                logger.warning(f"Index creation failed (may already exist): {index_sql} - {str(e)}")
 
         db.commit()
-        logger.info("Database performance indexes created successfully")
+        logger.info("Performance indexes created successfully")
 
     except Exception as e:
-        logger.error(f"Error creating performance indexes: {e}")
+        logger.error(f"Error creating performance indexes: {str(e)}")
+    finally:
         if 'db' in locals():
-            db.rollback()
+            db.close()
+
+def migrate_database_for_busy_status():
+    """
+    Migrate existing database to add busy_at column to consultations table.
+    This function is safe to run multiple times.
+    """
+    try:
+        # Get database connection
+        db = get_db()
+
+        # Check if busy_at column already exists
+        result = db.execute("PRAGMA table_info(consultations);").fetchall()
+        columns = [row[1] for row in result]
+        
+        if 'busy_at' not in columns:
+            logger.info("Adding busy_at column to consultations table...")
+            db.execute("ALTER TABLE consultations ADD COLUMN busy_at DATETIME;")
+            db.commit()
+            logger.info("Successfully added busy_at column to consultations table")
+        else:
+            logger.info("busy_at column already exists in consultations table")
+
+        # Update the consultation status enum to include BUSY if using SQLite
+        # Note: SQLite doesn't support ALTER TYPE, so we rely on the application-level enum
+        logger.info("Database migration for BUSY status completed successfully")
+
+    except Exception as e:
+        logger.error(f"Error during database migration: {str(e)}")
+        raise
     finally:
         if 'db' in locals():
             db.close()
@@ -540,91 +556,35 @@ def _test_admin_login(admin, password):
         logger.error(f"❌ Admin login test failed with error: {e}")
         return False
 
-def init_db():
+def init_db(force_recreate=False):
     """
-    Initialize database tables, create indexes, and ensure system integrity.
-    This includes comprehensive admin account validation and automatic repair.
+    Initialize the database with all tables and indexes.
+    
+    Args:
+        force_recreate (bool): If True, drop and recreate all tables
     """
-    logger.info("🚀 Initializing ConsultEase database...")
-
-    # Create tables
-    Base.metadata.create_all(bind=engine)
-    logger.info("✅ Database tables created/verified")
-
-    # Create performance indexes for frequently queried fields
-    _create_performance_indexes()
-    logger.info("✅ Performance indexes created/verified")
-
-    # Check admin account status but don't auto-create for first-time setup
-    logger.info("🔐 Checking admin account status...")
-
     try:
-        from .admin import Admin
-        db = get_db()
-        admin_count = db.query(Admin).count()
-
-        if admin_count == 0:
-            logger.info("📋 No admin accounts found - first-time setup will be available")
-            logger.info("🎯 Users can create admin accounts through the first-time setup dialog")
-        else:
-            logger.info(f"✅ Found {admin_count} admin account(s) in database")
-            # Only run integrity check if accounts exist
-            admin_ready = _ensure_admin_account_integrity()
-            if not admin_ready:
-                logger.warning("⚠️  Admin account integrity issues detected")
-            else:
-                logger.info("✅ Admin accounts are ready for use")
-
-        db.close()
-
+        logger.info("Initializing database...")
+        
+        if force_recreate:
+            logger.warning("Force recreating database - all data will be lost!")
+            Base.metadata.drop_all(bind=engine)
+        
+        # Create all tables
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully")
+        
+        # Run database migration for BUSY status
+        migrate_database_for_busy_status()
+        
+        # Create performance indexes
+        _create_performance_indexes()
+        
+        # Ensure admin account integrity
+        _ensure_admin_account_integrity()
+        
+        logger.info("Database initialization completed successfully")
+        
     except Exception as e:
-        logger.error(f"❌ Error checking admin account status: {e}")
-        # In case of error, run the integrity check as fallback
-        logger.info("🔧 Running admin account integrity check as fallback...")
-        admin_ready = _ensure_admin_account_integrity()
-        if not admin_ready:
-            logger.error("❌ CRITICAL: Admin account setup failed!")
-            logger.error("❌ System may not be accessible through admin interface!")
-
-    # Check if we need to create default data
-    db = get_db()
-    try:
-        # Import models here to avoid circular imports
-        from .admin import Admin
-        from .faculty import Faculty
-        from .student import Student
-
-        # Check if faculty table is empty
-        faculty_count = db.query(Faculty).count()
-        if faculty_count == 0:
-            logger.info("📋 Faculty table is empty - ready for admin to add faculty members")
-            logger.info("🎯 Use the admin dashboard to add faculty members with their BLE beacon IDs")
-
-        # Check if student table is empty
-        student_count = db.query(Student).count()
-        if student_count == 0:
-            # Create some sample students
-            sample_students = [
-                Student(
-                    name="Alice Johnson",
-                    department="Computer Science",
-                    rfid_uid="TESTCARD123"
-                ),
-                Student(
-                    name="Bob Williams",
-                    department="Mathematics",
-                    rfid_uid="TESTCARD456"
-                )
-            ]
-            db.add_all(sample_students)
-            logger.info("✅ Created sample student data")
-
-        db.commit()
-        logger.info("✅ Database initialization completed successfully")
-
-    except Exception as e:
-        logger.error(f"❌ Error creating default data: {str(e)}")
-        db.rollback()
-    finally:
-        db.close()
-        close_db()  # Return the connection to the pool
+        logger.error(f"Database initialization failed: {str(e)}")
+        raise

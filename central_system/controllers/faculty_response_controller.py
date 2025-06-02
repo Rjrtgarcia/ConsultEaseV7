@@ -228,14 +228,12 @@ class FacultyResponseController:
                 new_status_enum: Optional[ConsultationStatus] = None
                 if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
                     new_status_enum = ConsultationStatus.ACCEPTED
+                elif response_type == "BUSY" or response_type == "UNAVAILABLE":
+                    new_status_enum = ConsultationStatus.BUSY
                 elif response_type == "REJECTED" or response_type == "DECLINED": # Allow "DECLINED"
-                    new_status_enum = ConsultationStatus.REJECTED
+                    new_status_enum = ConsultationStatus.CANCELLED
                 elif response_type == "COMPLETED":
                     new_status_enum = ConsultationStatus.COMPLETED
-                # Add other states like STARTED, BUSY if your faculty unit supports them
-                # Example:
-                # elif response_type == "BUSY":
-                # new_status_enum = ConsultationStatus.BUSY # Assuming you add this to Enum
 
                 if new_status_enum:
                     # Import ConsultationController locally or ensure it's available via __init__
@@ -279,19 +277,33 @@ class FacultyResponseController:
                     Consultation.status == ConsultationStatus.ACCEPTED
                 ).count()
 
+                total_busy = db.query(Consultation).filter(
+                    Consultation.status == ConsultationStatus.BUSY
+                ).count()
+
                 total_declined = db.query(Consultation).filter(
-                    Consultation.status == ConsultationStatus.DECLINED
+                    Consultation.status == ConsultationStatus.CANCELLED
                 ).count()
 
                 total_pending = db.query(Consultation).filter(
                     Consultation.status == ConsultationStatus.PENDING
                 ).count()
 
+                total_completed = db.query(Consultation).filter(
+                    Consultation.status == ConsultationStatus.COMPLETED
+                ).count()
+
+                total_responded = total_acknowledged + total_busy + total_declined
+                total_all = total_responded + total_pending + total_completed
+
                 return {
                     'total_acknowledged': total_acknowledged,
+                    'total_busy': total_busy,
                     'total_declined': total_declined,
+                    'total_completed': total_completed,
                     'total_pending': total_pending,
-                    'response_rate': (total_acknowledged + total_declined) / max(1, total_acknowledged + total_declined + total_pending) * 100
+                    'total_responded': total_responded,
+                    'response_rate': (total_responded / max(1, total_all)) * 100
                 }
 
             finally:
@@ -301,8 +313,11 @@ class FacultyResponseController:
             logger.error(f"Error getting response statistics: {str(e)}")
             return {
                 'total_acknowledged': 0,
+                'total_busy': 0,
                 'total_declined': 0,
+                'total_completed': 0,
                 'total_pending': 0,
+                'total_responded': 0,
                 'response_rate': 0
             }
 

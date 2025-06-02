@@ -169,17 +169,31 @@ class RFIDController:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return []
 
-    def simulate_scan(self, rfid_uid=None):
+    def get_device_status(self):
         """
-        Simulate an RFID scan for development purposes.
+        Get RFID device status.
+        
+        Returns:
+            dict: Device status information
+        """
+        if self.rfid_service:
+            return self.rfid_service.get_device_status()
+        return {
+            'device_path': None,
+            'running': False,
+            'status': 'disconnected'
+        }
 
-        Args:
-            rfid_uid (str, optional): RFID UID to simulate. If None, a random UID is generated.
+    def retry_connection(self):
+        """
+        Retry RFID device connection.
 
         Returns:
-            str: The simulated RFID UID
+            bool: True if reconnection successful
         """
-        return self.rfid_service.simulate_card_read(rfid_uid)
+        if self.rfid_service:
+            return self.rfid_service.retry_device_connection()
+        return False
 
     def handle_authenticated_student(self, student):
         """

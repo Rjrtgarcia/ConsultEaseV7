@@ -219,6 +219,12 @@ class DashboardWindow(BaseWindow):
 
     def __init__(self, student=None, parent=None):
         self.student = student
+        self.faculty_list = []
+        self.consultation_panel = None
+        
+        # Set up real-time consultation status updates
+        self.setup_real_time_updates()
+        
         super().__init__(parent)
         self.init_ui()
 
@@ -482,7 +488,7 @@ class DashboardWindow(BaseWindow):
         faculty_layout.addWidget(faculty_scroll)
 
         # Consultation panel with request form and history
-        self.consultation_panel = ConsultationPanel(self.student)
+        self.consultation_panel = ConsultationPanel(self.student, self)
         self.consultation_panel.consultation_requested.connect(self.handle_consultation_request)
         self.consultation_panel.consultation_cancelled.connect(self.handle_consultation_cancel)
 
@@ -1456,35 +1462,6 @@ class DashboardWindow(BaseWindow):
             self.faculty_scroll.verticalScrollBar().setValue(0)
             logger.debug("Scrolled faculty grid to top")
 
-    def simulate_consultation_request(self):
-        """
-        Simulate a consultation request for testing purposes.
-        This method finds an available faculty and shows the consultation form.
-        """
-        try:
-            # Import faculty controller
-            from ..controllers import FacultyController
-
-            # Get faculty controller
-            faculty_controller = FacultyController()
-
-            # Get available faculty
-            available_faculty = faculty_controller.get_all_faculty(filter_available=True)
-
-            if available_faculty:
-                # Use the first available faculty
-                faculty = available_faculty[0]
-                logger.info(f"Simulating consultation request with faculty: {faculty.name}")
-
-                # Show the consultation form
-                self.show_consultation_form(faculty)
-            else:
-                logger.warning("No available faculty found for simulation")
-                self.show_notification("No available faculty found. Please try again later.", "error")
-        except Exception as e:
-            logger.error(f"Error simulating consultation request: {str(e)}")
-            self.show_notification("Error simulating consultation request", "error")
-
     def _clear_faculty_grid_pooled(self):
         """
         Clear the faculty grid efficiently using pooled cards.
@@ -1715,3 +1692,118 @@ class DashboardWindow(BaseWindow):
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def setup_real_time_updates(self):
+        """
+        Set up real-time updates for consultation status changes.
+        """
+        try:
+            # Import and register with faculty response controller
+            from ..controllers.faculty_response_controller import get_faculty_response_controller
+            
+            self.faculty_response_controller = get_faculty_response_controller()
+            self.faculty_response_controller.register_callback(self.handle_faculty_response_update)
+            
+            logger.info("Registered for real-time consultation status updates")
+            
+        except Exception as e:
+            logger.error(f"Failed to set up real-time updates: {str(e)}")
+
+    def handle_faculty_response_update(self, response_data):
+        """
+        Handle real-time faculty response updates.
+        
+        Args:
+            response_data (dict): Faculty response data containing consultation updates
+        """
+        try:
+            # Check if this response is for the current student
+            student_id = response_data.get('student_id')
+            if not student_id:
+                return
+                
+            # Get current student ID
+            current_student_id = None
+            if isinstance(self.student, dict):
+                current_student_id = self.student.get('id')
+            else:
+                current_student_id = getattr(self.student, 'id', None)
+                
+            if current_student_id != student_id:
+                return  # Not for this student
+                
+            # Extract response information
+            response_type = response_data.get('response_type', 'Unknown')
+            faculty_name = response_data.get('faculty_name', 'Faculty')
+            consultation_id = response_data.get('consultation_id')
+            
+            # Show notification to student
+            self.show_consultation_status_notification(response_type, faculty_name, consultation_id)
+            
+            # Refresh consultation history if panel is available
+            if self.consultation_panel:
+                self.consultation_panel.refresh_history()
+                
+            logger.info(f"Processed real-time consultation update: {response_type} from {faculty_name}")
+            
+        except Exception as e:
+            logger.error(f"Error handling faculty response update: {str(e)}")
+
+    def show_consultation_status_notification(self, response_type, faculty_name, consultation_id):
+        """
+        Show a notification to the student about consultation status change.
+        
+        Args:
+            response_type (str): Type of faculty response (ACKNOWLEDGE, BUSY, etc.)
+            faculty_name (str): Name of the faculty member
+            consultation_id (int): ID of the consultation
+        """
+        try:
+            # Import notification utilities
+            from ..utils.notification import NotificationManager
+            
+            # Create appropriate notification message
+            if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
+                title = "Consultation Accepted!"
+                message = f"{faculty_name} has accepted your consultation request."
+                notification_type = NotificationManager.SUCCESS
+            elif response_type == "BUSY" or response_type == "UNAVAILABLE":
+                title = "Faculty Busy"
+                message = f"{faculty_name} is currently busy and cannot take your consultation request."
+                notification_type = NotificationManager.WARNING
+            elif response_type == "REJECTED" or response_type == "DECLINED":
+                title = "Consultation Declined"
+                message = f"{faculty_name} has declined your consultation request."
+                notification_type = NotificationManager.ERROR
+            elif response_type == "COMPLETED":
+                title = "Consultation Completed"
+                message = f"Your consultation with {faculty_name} has been completed."
+                notification_type = NotificationManager.INFO
+            else:
+                title = "Consultation Update"
+                message = f"{faculty_name} has responded to your consultation request."
+                notification_type = NotificationManager.INFO
+            
+            # Show the notification
+            NotificationManager.show_message(
+                self,
+                title,
+                message,
+                notification_type
+            )
+            
+        except ImportError:
+            # Fallback to basic message box if notification manager not available
+            from PyQt5.QtWidgets import QMessageBox
+            
+            if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
+                QMessageBox.information(self, "Consultation Accepted", 
+                                      f"{faculty_name} has accepted your consultation request.")
+            elif response_type == "BUSY" or response_type == "UNAVAILABLE":
+                QMessageBox.warning(self, "Faculty Busy", 
+                                  f"{faculty_name} is currently busy and cannot take your consultation request.")
+            else:
+                QMessageBox.information(self, "Consultation Update", 
+                                      f"{faculty_name} has responded to your consultation request.")
+        except Exception as e:
+            logger.error(f"Error showing consultation status notification: {str(e)}")

@@ -774,10 +774,141 @@ int getCenterX(String text, int textSize) {
 }
 
 // ================================
+// MESSAGE DISPLAY WITH ENHANCED CONSULTATION REQUEST HANDLING
+// ================================
+void displayIncomingMessage(String message) {
+  currentMessage = message;
+  messageDisplayed = true;
+  messageDisplayStart = millis();
+
+  // Clear main area
+  tft.fillRect(0, MAIN_AREA_Y, SCREEN_WIDTH, MAIN_AREA_HEIGHT, COLOR_PANEL);
+
+  // Enhanced message header with consultation ID
+  drawSimpleCard(10, MAIN_AREA_Y + 5, SCREEN_WIDTH - 20, 30, COLOR_ACCENT);
+
+  int headerX = getCenterX("CONSULTATION REQUEST", 2);
+  tft.setCursor(headerX, MAIN_AREA_Y + 12);
+  tft.setTextColor(COLOR_BACKGROUND);
+  tft.setTextSize(2);
+  tft.print("CONSULTATION REQUEST");
+
+  // Display consultation ID if available
+  if (!g_receivedConsultationId.isEmpty()) {
+    tft.setCursor(15, MAIN_AREA_Y + 25);
+    tft.setTextColor(COLOR_BACKGROUND);
+    tft.setTextSize(1);
+    tft.print("ID: " + g_receivedConsultationId);
+  }
+
+  // Message content area with better formatting
+  tft.setCursor(15, MAIN_AREA_Y + 45);
+  tft.setTextColor(COLOR_TEXT);
+  tft.setTextSize(1);
+
+  int lineHeight = 10;
+  int maxCharsPerLine = 38;
+  int currentY = MAIN_AREA_Y + 45;
+  int maxLines = 4; // Limit to 4 lines to leave space for buttons
+
+  // Parse and display student info if available
+  int fromIndex = message.indexOf("From:");
+  int sidIndex = message.indexOf("(SID:");
+  int messageIndex = message.indexOf("): ");
+  
+  if (fromIndex != -1 && sidIndex != -1 && messageIndex != -1) {
+    // Extract student name
+    String studentName = message.substring(fromIndex + 5, sidIndex);
+    studentName.trim();
+    
+    // Display student info
+    tft.setCursor(15, currentY);
+    tft.setTextColor(COLOR_ACCENT);
+    tft.print("Student: ");
+    tft.setTextColor(COLOR_TEXT);
+    tft.print(studentName);
+    currentY += lineHeight + 2;
+    
+    // Extract and display the actual consultation message
+    String consultationMsg = message.substring(messageIndex + 3);
+    consultationMsg.trim();
+    
+    tft.setCursor(15, currentY);
+    tft.setTextColor(COLOR_ACCENT);
+    tft.print("Request:");
+    currentY += lineHeight;
+    
+    // Display consultation message with word wrapping
+    int linesUsed = 0;
+    for (int i = 0; i < consultationMsg.length() && linesUsed < maxLines - 2; i += maxCharsPerLine) {
+      String line = consultationMsg.substring(i, min(i + maxCharsPerLine, (int)consultationMsg.length()));
+      tft.setCursor(15, currentY);
+      tft.setTextColor(COLOR_TEXT);
+      tft.print(line);
+      currentY += lineHeight;
+      linesUsed++;
+    }
+  } else {
+    // Fallback: display raw message with word wrapping
+    int linesUsed = 0;
+    for (int i = 0; i < message.length() && linesUsed < maxLines; i += maxCharsPerLine) {
+      String line = message.substring(i, min(i + maxCharsPerLine, (int)message.length()));
+      tft.setCursor(15, currentY);
+      tft.print(line);
+      currentY += lineHeight;
+      linesUsed++;
+    }
+  }
+
+  // Enhanced button instructions with clearer prompts
+  drawSimpleCard(10, MAIN_AREA_Y + 100, 145, 40, COLOR_BLUE);
+  drawSimpleCard(165, MAIN_AREA_Y + 100, 145, 40, COLOR_ERROR);
+
+  // Blue button (Accept/Acknowledge) - Enhanced styling
+  tft.setCursor(20, MAIN_AREA_Y + 107);
+  tft.setTextColor(COLOR_WHITE);
+  tft.setTextSize(1);
+  tft.print("BLUE BUTTON");
+  tft.setCursor(25, MAIN_AREA_Y + 118);
+  tft.setTextSize(2);
+  tft.print("ACCEPT");
+  tft.setCursor(20, MAIN_AREA_Y + 132);
+  tft.setTextSize(1);
+  tft.print("(Acknowledge)");
+
+  // Red button (Busy/Decline) - Enhanced styling
+  tft.setCursor(175, MAIN_AREA_Y + 107);
+  tft.setTextColor(COLOR_WHITE);
+  tft.setTextSize(1);
+  tft.print("RED BUTTON");
+  tft.setCursor(185, MAIN_AREA_Y + 118);
+  tft.setTextSize(2);
+  tft.print("BUSY");
+  tft.setCursor(175, MAIN_AREA_Y + 132);
+  tft.setTextSize(1);
+  tft.print("(Unavailable)");
+
+  // Add timeout indicator
+  tft.setCursor(15, STATUS_PANEL_Y + 5);
+  tft.setTextColor(COLOR_WARNING);
+  tft.setTextSize(1);
+  tft.print("Auto-clear in 30s");
+
+  DEBUG_PRINTF("📱 Enhanced consultation request displayed. ID: %s\n", g_receivedConsultationId.c_str());
+}
+
+// ================================
 // BUTTON RESPONSE FUNCTIONS (UNCHANGED)
 // ================================
 void handleAcknowledgeButton() {
   if (!messageDisplayed || currentMessage.isEmpty()) return;
+
+  // Check if faculty is present before allowing response
+  if (!presenceDetector.getPresence()) {
+    DEBUG_PRINTLN("❌ Cannot send ACKNOWLEDGE: Faculty not present");
+    showResponseConfirmation("NOT PRESENT!", COLOR_ERROR);
+    return;
+  }
 
   if (g_receivedConsultationId.isEmpty()) {
     DEBUG_PRINTLN("❌ Cannot send ACKNOWLEDGE: Missing Consultation ID (CID).");
@@ -787,7 +918,7 @@ void handleAcknowledgeButton() {
 
   DEBUG_PRINTLN("📤 Sending ACKNOWLEDGE response to central terminal");
 
-  // Create acknowledge response
+  // Create acknowledge response with enhanced data
   String response = "{";
   response += "\"faculty_id\":" + String(FACULTY_ID) + ",";
   response += "\"faculty_name\":\"" + String(FACULTY_NAME) + "\",";
@@ -795,6 +926,8 @@ void handleAcknowledgeButton() {
   response += "\"message_id\":\"" + g_receivedConsultationId + "\",";
   response += "\"original_message\":\"" + lastReceivedMessage + "\",";
   response += "\"timestamp\":\"" + String(millis()) + "\",";
+  response += "\"faculty_present\":true,";
+  response += "\"response_method\":\"physical_button\",";
   response += "\"status\":\"Professor acknowledges the request and will respond accordingly\"";
   response += "}";
 
@@ -820,6 +953,13 @@ void handleAcknowledgeButton() {
 void handleBusyButton() {
   if (!messageDisplayed || currentMessage.isEmpty()) return;
 
+  // Check if faculty is present before allowing response
+  if (!presenceDetector.getPresence()) {
+    DEBUG_PRINTLN("❌ Cannot send BUSY: Faculty not present");
+    showResponseConfirmation("NOT PRESENT!", COLOR_ERROR);
+    return;
+  }
+
   if (g_receivedConsultationId.isEmpty()) {
     DEBUG_PRINTLN("❌ Cannot send BUSY: Missing Consultation ID (CID).");
     showResponseConfirmation("NO CID!", COLOR_ERROR);
@@ -828,7 +968,7 @@ void handleBusyButton() {
 
   DEBUG_PRINTLN("📤 Sending BUSY response to central terminal");
 
-  // Create busy response
+  // Create busy response with enhanced data
   String response = "{";
   response += "\"faculty_id\":" + String(FACULTY_ID) + ",";
   response += "\"faculty_name\":\"" + String(FACULTY_NAME) + "\",";
@@ -836,6 +976,8 @@ void handleBusyButton() {
   response += "\"message_id\":\"" + g_receivedConsultationId + "\",";
   response += "\"original_message\":\"" + lastReceivedMessage + "\",";
   response += "\"timestamp\":\"" + String(millis()) + "\",";
+  response += "\"faculty_present\":true,";
+  response += "\"response_method\":\"physical_button\",";
   response += "\"status\":\"Professor is currently busy and cannot cater to this request\"";
   response += "}";
 
@@ -1435,68 +1577,6 @@ void updateSystemStatus() {
 }
 
 // ================================
-// MESSAGE DISPLAY WITH BUTTONS (UNCHANGED)
-// ================================
-void displayIncomingMessage(String message) {
-  currentMessage = message;
-  messageDisplayed = true;
-  messageDisplayStart = millis();
-
-  // Clear main area
-  tft.fillRect(0, MAIN_AREA_Y, SCREEN_WIDTH, MAIN_AREA_HEIGHT, COLOR_PANEL);
-
-  // Message header
-  drawSimpleCard(10, MAIN_AREA_Y + 5, SCREEN_WIDTH - 20, 25, COLOR_ACCENT);
-
-  int newMessageX = getCenterX("NEW MESSAGE", 2);
-  tft.setCursor(newMessageX, MAIN_AREA_Y + 12);
-  tft.setTextColor(COLOR_BACKGROUND);
-  tft.setTextSize(2);
-  tft.print("NEW MESSAGE");
-
-  // Message content area
-  tft.setCursor(15, MAIN_AREA_Y + 40);
-  tft.setTextColor(COLOR_TEXT);
-  tft.setTextSize(1);
-
-  int lineHeight = 10;
-  int maxCharsPerLine = 40;
-  int currentY = MAIN_AREA_Y + 40;
-
-  // Display message with word wrapping
-  for (int i = 0; i < message.length(); i += maxCharsPerLine) {
-    String line = message.substring(i, min(i + maxCharsPerLine, (int)message.length()));
-    tft.setCursor(15, currentY);
-    tft.print(line);
-    currentY += lineHeight;
-
-    if (currentY > MAIN_AREA_Y + 85) break; // Leave space for buttons
-  }
-
-  // Button instructions
-  drawSimpleCard(10, MAIN_AREA_Y + 95, 145, 35, COLOR_BLUE_BG);
-  drawSimpleCard(165, MAIN_AREA_Y + 95, 145, 35, COLOR_ERROR_BG);
-
-  // Blue button (Acknowledge)
-  tft.setCursor(15, MAIN_AREA_Y + 102);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setTextSize(1);
-  tft.print("BLUE BUTTON:");
-  tft.setCursor(15, MAIN_AREA_Y + 115);
-  tft.print("ACKNOWLEDGE");
-
-  // Red button (Busy)
-  tft.setCursor(170, MAIN_AREA_Y + 102);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setTextSize(1);
-  tft.print("RED BUTTON:");
-  tft.setCursor(170, MAIN_AREA_Y + 115);
-  tft.print("BUSY");
-
-  DEBUG_PRINTF("📱 Message displayed with buttons. Message ID: %s\n", g_receivedConsultationId.c_str());
-}
-
-// ================================
 // MAIN SETUP FUNCTION
 // ================================
 void setup() {
@@ -1569,6 +1649,12 @@ void loop() {
 
   // Update offline queue system
   updateOfflineQueue();
+
+  // Handle consultation request timeout
+  if (messageDisplayed && (millis() - messageDisplayStart > MESSAGE_DISPLAY_TIMEOUT)) {
+    DEBUG_PRINTLN("⏰ Consultation request timed out - auto-clearing");
+    clearCurrentMessage();
+  }
 
   // ADAPTIVE BLE SCANNING WITH GRACE PERIOD (Replaces old performBLEScan)
   adaptiveScanner.update();

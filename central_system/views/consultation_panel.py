@@ -700,6 +700,11 @@ class ConsultationHistoryPanel(QFrame):
                     "fg": QColor(255, 255, 255),  # White text for contrast
                     "border": "#2b8a3e"           # Darker border for definition
                 },
+                "busy": {
+                    "bg": QColor(255, 152, 0),    # Orange for busy status
+                    "fg": QColor(255, 255, 255),  # White text for contrast
+                    "border": "#e65100"           # Darker orange border
+                },
                 "completed": {
                     "bg": QColor(0, 123, 255),    # Enhanced blue
                     "fg": QColor(255, 255, 255),  # White text for contrast
@@ -904,6 +909,13 @@ class ConsultationDetailsDialog(QDialog):
                 "padding": "8px 12px",
                 "border-radius": "6px"
             },
+            "busy": {
+                "color": "#ffffff",                # White text
+                "background": "#ff9800",           # Orange background for busy
+                "border": "2px solid #e65100",     # Darker orange border
+                "padding": "8px 12px",
+                "border-radius": "6px"
+            },
             "completed": {
                 "color": "#ffffff",                # White text
                 "background": "#339af0",           # Bright blue background
@@ -942,6 +954,12 @@ class ConsultationDetailsDialog(QDialog):
             accepted_label = QLabel("Accepted:")
             accepted_value = QLabel(self.consultation.accepted_at.strftime("%Y-%m-%d %H:%M"))
             details_layout.addRow(accepted_label, accepted_value)
+
+        # Busy date (if applicable)
+        if self.consultation.busy_at:
+            busy_label = QLabel("Marked Busy:")
+            busy_value = QLabel(self.consultation.busy_at.strftime("%Y-%m-%d %H:%M"))
+            details_layout.addRow(busy_label, busy_value)
 
         # Completed date (if applicable)
         if self.consultation.completed_at:
