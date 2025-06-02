@@ -79,7 +79,7 @@
 // === BUTTON CONFIGURATION ===
 #define BUTTON_A_PIN 15               // Blue button (Acknowledge)
 #define BUTTON_B_PIN 4                // Red button (Busy)
-#define BUTTON_DEBOUNCE_DELAY 50      // Debounce delay in milliseconds
+#define BUTTON_DEBOUNCE_DELAY 20      // Debounce delay in milliseconds - REDUCED for testing
 #define BUTTON_LONG_PRESS_TIME 1000   // Long press detection time
 
 // === DISPLAY CONFIGURATION (2.4" 320x240 ST7789) ===

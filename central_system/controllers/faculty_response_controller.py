@@ -203,18 +203,36 @@ class FacultyResponseController:
                 logger.error("Faculty response missing 'faculty_id' in payload.")
                 return False
 
+            # CRITICAL FIX: Convert consultation_id from string to integer
+            # ESP32 sends consultation_id as string, but database expects integer
+            try:
+                consultation_id_int = int(consultation_id_from_response)
+                logger.debug(f"Converted consultation_id from '{consultation_id_from_response}' (string) to {consultation_id_int} (int)")
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid consultation_id format: '{consultation_id_from_response}' cannot be converted to integer: {e}")
+                return False
+
+            # CRITICAL FIX: Convert faculty_id from string to integer for comparison
+            try:
+                faculty_id_int = int(faculty_id_from_payload)
+                logger.debug(f"Converted faculty_id from '{faculty_id_from_payload}' (string) to {faculty_id_int} (int)")
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid faculty_id format: '{faculty_id_from_payload}' cannot be converted to integer: {e}")
+                return False
+
             db = get_db()
             try:
-                consultation = db.query(Consultation).filter(Consultation.id == consultation_id_from_response).first()
+                # Use the converted integer consultation_id for database query
+                consultation = db.query(Consultation).filter(Consultation.id == consultation_id_int).first()
 
                 if not consultation:
-                    logger.warning(f"Consultation ID {consultation_id_from_response} (from response) not found in database.")
+                    logger.warning(f"Consultation ID {consultation_id_int} (converted from '{consultation_id_from_response}') not found in database.")
                     return False
 
-                # Verification
-                if str(consultation.faculty_id) != str(faculty_id_from_payload):
+                # Verification - compare as integers
+                if consultation.faculty_id != faculty_id_int:
                     logger.warning(f"Faculty ID mismatch for consultation {consultation.id}. "
-                                   f"Response payload for faculty {faculty_id_from_payload}, "
+                                   f"Response payload for faculty {faculty_id_int} (converted from '{faculty_id_from_payload}'), "
                                    f"but consultation belongs to faculty {consultation.faculty_id}. Ignoring response.")
                     return False
 
@@ -242,7 +260,7 @@ class FacultyResponseController:
                     updated_consultation = cc.update_consultation_status(consultation.id, new_status_enum)
                     
                     if updated_consultation:
-                        logger.info(f"Successfully updated consultation {consultation.id} to status {new_status_enum.value} via ConsultationController.")
+                        logger.info(f"✅ Successfully updated consultation {consultation.id} to status {new_status_enum.value} via ConsultationController.")
                         # Add consultation_id and student_id to response_data for callbacks, if not already there
                         response_data['consultation_id'] = consultation.id 
                         response_data['student_id'] = consultation.student_id

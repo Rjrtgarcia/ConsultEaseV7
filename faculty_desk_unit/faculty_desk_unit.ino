@@ -226,16 +226,51 @@ public:
   }
 
   void update() {
+    // Add debug logging for button states - REDUCED frequency for better real-time monitoring
+    static unsigned long lastDebugPrint = 0;
+    bool currentA = digitalRead(pinA);
+    bool currentB = digitalRead(pinB);
+    
+    // Print raw button states every 10 seconds instead of 2 now that it's working
+    if (millis() - lastDebugPrint > 10000) {
+      DEBUG_PRINTF("🔧 Button Debug - Raw states: A(Pin%d)=%s, B(Pin%d)=%s\n", 
+                   pinA, currentA ? "HIGH" : "LOW", 
+                   pinB, currentB ? "HIGH" : "LOW");
+      DEBUG_PRINTF("🔧 Button Debug - Flag states: buttonAPressed=%s, buttonBPressed=%s\n",
+                   buttonAPressed ? "TRUE" : "FALSE",
+                   buttonBPressed ? "TRUE" : "FALSE");
+      lastDebugPrint = millis();
+    }
+
     // Button A (Acknowledge) handling
     bool readingA = digitalRead(pinA);
     if (readingA != lastStateA) {
       lastDebounceA = millis();
-    }
-
-    if ((millis() - lastDebounceA) > BUTTON_DEBOUNCE_DELAY) {
+      DEBUG_PRINTF("🔧 Button A state change: %s -> %s at %lu ms (debounce timer reset)\n", 
+                   lastStateA ? "HIGH" : "LOW", 
+                   readingA ? "HIGH" : "LOW",
+                   millis());
+      
+      // IMMEDIATE DETECTION - Set flag instantly on press to handle slow main loops
       if (readingA == LOW && lastStateA == HIGH) {
         buttonAPressed = true;
-        DEBUG_PRINTLN("🔵 BUTTON A (ACKNOWLEDGE) PRESSED");
+        DEBUG_PRINTLN("🔵 BUTTON A PRESSED - FLAG SET IMMEDIATELY (no debounce wait)!");
+      }
+    }
+
+    unsigned long currentTime = millis();
+    unsigned long debounceElapsed = currentTime - lastDebounceA;
+    
+    if (debounceElapsed > BUTTON_DEBOUNCE_DELAY) {
+      if (readingA == LOW && lastStateA == HIGH) {
+        buttonAPressed = true;
+        DEBUG_PRINTF("🔵 BUTTON A (ACKNOWLEDGE) PRESSED - FLAG SET! (debounce: %lu ms)\n", debounceElapsed);
+      }
+    } else {
+      // Debug why debounce is blocking
+      if (readingA == LOW && lastStateA == HIGH) {
+        DEBUG_PRINTF("🕐 Button A press BLOCKED by debounce (elapsed: %lu ms < required: %d ms)\n", 
+                     debounceElapsed, BUTTON_DEBOUNCE_DELAY);
       }
     }
     lastStateA = readingA;
@@ -244,12 +279,30 @@ public:
     bool readingB = digitalRead(pinB);
     if (readingB != lastStateB) {
       lastDebounceB = millis();
-    }
-
-    if ((millis() - lastDebounceB) > BUTTON_DEBOUNCE_DELAY) {
+      DEBUG_PRINTF("🔧 Button B state change: %s -> %s at %lu ms (debounce timer reset)\n", 
+                   lastStateB ? "HIGH" : "LOW", 
+                   readingB ? "HIGH" : "LOW",
+                   millis());
+      
+      // IMMEDIATE DETECTION - Set flag instantly on press to handle slow main loops
       if (readingB == LOW && lastStateB == HIGH) {
         buttonBPressed = true;
-        DEBUG_PRINTLN("🔴 BUTTON B (BUSY) PRESSED");
+        DEBUG_PRINTLN("🔴 BUTTON B PRESSED - FLAG SET IMMEDIATELY (no debounce wait)!");
+      }
+    }
+
+    unsigned long debounceElapsedB = currentTime - lastDebounceB;
+    
+    if (debounceElapsedB > BUTTON_DEBOUNCE_DELAY) {
+      if (readingB == LOW && lastStateB == HIGH) {
+        buttonBPressed = true;
+        DEBUG_PRINTF("🔴 BUTTON B (BUSY) PRESSED - FLAG SET! (debounce: %lu ms)\n", debounceElapsedB);
+      }
+    } else {
+      // Debug why debounce is blocking
+      if (readingB == LOW && lastStateB == HIGH) {
+        DEBUG_PRINTF("🕐 Button B press BLOCKED by debounce (elapsed: %lu ms < required: %d ms)\n", 
+                     debounceElapsedB, BUTTON_DEBOUNCE_DELAY);
       }
     }
     lastStateB = readingB;
@@ -257,6 +310,7 @@ public:
 
   bool isButtonAPressed() {
     if (buttonAPressed) {
+      DEBUG_PRINTLN("🔵 Button A flag was SET, clearing and returning TRUE");
       buttonAPressed = false;
       return true;
     }
@@ -265,6 +319,7 @@ public:
 
   bool isButtonBPressed() {
     if (buttonBPressed) {
+      DEBUG_PRINTLN("🔴 Button B flag was SET, clearing and returning TRUE");
       buttonBPressed = false;
       return true;
     }
@@ -882,15 +937,31 @@ void displayIncomingMessage(String message) {
 // BUTTON RESPONSE FUNCTIONS (UNCHANGED)
 // ================================
 void handleAcknowledgeButton() {
-  if (!messageDisplayed || currentMessage.isEmpty()) return;
+  DEBUG_PRINTLN("🔵 handleAcknowledgeButton() called!");
+  
+  // Debug all the conditions that could cause early return
+  DEBUG_PRINTF("   messageDisplayed: %s\n", messageDisplayed ? "TRUE" : "FALSE");
+  DEBUG_PRINTF("   currentMessage.isEmpty(): %s\n", currentMessage.isEmpty() ? "TRUE" : "FALSE");
+  DEBUG_PRINTF("   currentMessage content: '%s'\n", currentMessage.c_str());
+  
+  if (!messageDisplayed || currentMessage.isEmpty()) {
+    DEBUG_PRINTLN("❌ EARLY RETURN: No message displayed or message is empty");
+    return;
+  }
 
   // Check if faculty is present before allowing response
-  if (!presenceDetector.getPresence()) {
+  bool facultyPresent = presenceDetector.getPresence();
+  DEBUG_PRINTF("   Faculty present: %s\n", facultyPresent ? "TRUE" : "FALSE");
+  
+  if (!facultyPresent) {
     DEBUG_PRINTLN("❌ Cannot send ACKNOWLEDGE: Faculty not present");
     showResponseConfirmation("NOT PRESENT!", COLOR_ERROR);
     return;
   }
 
+  DEBUG_PRINTF("   g_receivedConsultationId: '%s'\n", g_receivedConsultationId.c_str());
+  DEBUG_PRINTF("   g_receivedConsultationId.isEmpty(): %s\n", g_receivedConsultationId.isEmpty() ? "TRUE" : "FALSE");
+  
   if (g_receivedConsultationId.isEmpty()) {
     DEBUG_PRINTLN("❌ Cannot send ACKNOWLEDGE: Missing Consultation ID (CID).");
     showResponseConfirmation("NO CID!", COLOR_ERROR);
@@ -898,6 +969,8 @@ void handleAcknowledgeButton() {
   }
 
   DEBUG_PRINTLN("📤 Sending ACKNOWLEDGE response to central terminal");
+  DEBUG_PRINTF("   MQTT connected: %s\n", mqttClient.connected() ? "TRUE" : "FALSE");
+  DEBUG_PRINTF("   WiFi connected: %s\n", wifiConnected ? "TRUE" : "FALSE");
 
   // Create acknowledge response with enhanced data
   String response = "{";
@@ -912,8 +985,13 @@ void handleAcknowledgeButton() {
   response += "\"status\":\"Professor acknowledges the request and will respond accordingly\"";
   response += "}";
 
+  DEBUG_PRINTF("📝 Response JSON: %s\n", response.c_str());
+  DEBUG_PRINTF("📡 Publishing to topic: %s\n", MQTT_TOPIC_RESPONSES);
+
   // Publish response with offline queuing support
   bool success = publishWithQueue(MQTT_TOPIC_RESPONSES, response.c_str(), true);
+  DEBUG_PRINTF("   publishWithQueue result: %s\n", success ? "SUCCESS" : "FAILED");
+  
   if (success) {
     if (mqttClient.connected()) {
       DEBUG_PRINTLN("✅ ACKNOWLEDGE response sent successfully");
@@ -928,19 +1006,36 @@ void handleAcknowledgeButton() {
   }
 
   // Clear message
+  DEBUG_PRINTLN("🧹 Calling clearCurrentMessage()");
   clearCurrentMessage();
 }
 
 void handleBusyButton() {
-  if (!messageDisplayed || currentMessage.isEmpty()) return;
+  DEBUG_PRINTLN("🔴 handleBusyButton() called!");
+  
+  // Debug all the conditions that could cause early return
+  DEBUG_PRINTF("   messageDisplayed: %s\n", messageDisplayed ? "TRUE" : "FALSE");
+  DEBUG_PRINTF("   currentMessage.isEmpty(): %s\n", currentMessage.isEmpty() ? "TRUE" : "FALSE");
+  DEBUG_PRINTF("   currentMessage content: '%s'\n", currentMessage.c_str());
+  
+  if (!messageDisplayed || currentMessage.isEmpty()) {
+    DEBUG_PRINTLN("❌ EARLY RETURN: No message displayed or message is empty");
+    return;
+  }
 
   // Check if faculty is present before allowing response
-  if (!presenceDetector.getPresence()) {
+  bool facultyPresent = presenceDetector.getPresence();
+  DEBUG_PRINTF("   Faculty present: %s\n", facultyPresent ? "TRUE" : "FALSE");
+  
+  if (!facultyPresent) {
     DEBUG_PRINTLN("❌ Cannot send BUSY: Faculty not present");
     showResponseConfirmation("NOT PRESENT!", COLOR_ERROR);
     return;
   }
 
+  DEBUG_PRINTF("   g_receivedConsultationId: '%s'\n", g_receivedConsultationId.c_str());
+  DEBUG_PRINTF("   g_receivedConsultationId.isEmpty(): %s\n", g_receivedConsultationId.isEmpty() ? "TRUE" : "FALSE");
+  
   if (g_receivedConsultationId.isEmpty()) {
     DEBUG_PRINTLN("❌ Cannot send BUSY: Missing Consultation ID (CID).");
     showResponseConfirmation("NO CID!", COLOR_ERROR);
@@ -948,6 +1043,8 @@ void handleBusyButton() {
   }
 
   DEBUG_PRINTLN("📤 Sending BUSY response to central terminal");
+  DEBUG_PRINTF("   MQTT connected: %s\n", mqttClient.connected() ? "TRUE" : "FALSE");
+  DEBUG_PRINTF("   WiFi connected: %s\n", wifiConnected ? "TRUE" : "FALSE");
 
   // Create busy response with enhanced data
   String response = "{";
@@ -962,8 +1059,13 @@ void handleBusyButton() {
   response += "\"status\":\"Professor is currently busy and cannot cater to this request\"";
   response += "}";
 
+  DEBUG_PRINTF("📝 Response JSON: %s\n", response.c_str());
+  DEBUG_PRINTF("📡 Publishing to topic: %s\n", MQTT_TOPIC_RESPONSES);
+
   // Publish response with offline queuing support
   bool success = publishWithQueue(MQTT_TOPIC_RESPONSES, response.c_str(), true);
+  DEBUG_PRINTF("   publishWithQueue result: %s\n", success ? "SUCCESS" : "FAILED");
+  
   if (success) {
     if (mqttClient.connected()) {
       DEBUG_PRINTLN("✅ BUSY response sent successfully");
@@ -978,6 +1080,7 @@ void handleBusyButton() {
   }
 
   // Clear message
+  DEBUG_PRINTLN("🧹 Calling clearCurrentMessage()");
   clearCurrentMessage();
 }
 
@@ -1249,6 +1352,8 @@ void connectMQTT() {
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+  DEBUG_PRINTF("📨 onMqttMessage called - Topic: %s, Length: %d\n", topic, length);
+  
   // Bounds checking for security
   if (length > MAX_MESSAGE_LENGTH) {
     DEBUG_PRINTF("⚠️ Message too long (%d bytes), truncating to %d\n", length, MAX_MESSAGE_LENGTH);
@@ -1266,13 +1371,20 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
   // Parse Consultation ID (CID) from the message
   // Expected format: "CID:{consultation_id} From:{student_name} (SID:{student_id}): {message}"
+  DEBUG_PRINTLN("🔍 Starting CID parsing...");
   int cidStartIndex = messageContent.indexOf("CID:");
+  DEBUG_PRINTF("   CID: search index = %d\n", cidStartIndex);
+  
   int cidEndIndex = -1;
   String parsedConsultationId = "";
 
   if (cidStartIndex != -1) {
     cidStartIndex += 4; // Length of "CID:"
+    DEBUG_PRINTF("   CID: start position = %d\n", cidStartIndex);
+    
     cidEndIndex = messageContent.indexOf(" ", cidStartIndex); // Assume CID ends before the next space
+    DEBUG_PRINTF("   CID: end position = %d\n", cidEndIndex);
+    
     if (cidEndIndex != -1) {
       parsedConsultationId = messageContent.substring(cidStartIndex, cidEndIndex);
     } else {
@@ -1280,10 +1392,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       // Or handle if the format guarantees CID is followed by a specific delimiter or is the first part.
       // For now, this basic parsing assumes a space after CID.
       // A more robust parser might be needed if message format varies greatly.
+      DEBUG_PRINTLN("   CID: No space found after CID, taking rest of string");
       parsedConsultationId = messageContent.substring(cidStartIndex); // Fallback: take rest of string (less safe)
     }
     g_receivedConsultationId = parsedConsultationId;
-    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): %s\n", g_receivedConsultationId.c_str());
+    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): '%s'\n", g_receivedConsultationId.c_str());
   } else {
     g_receivedConsultationId = ""; // Clear if not found, or handle error
     DEBUG_PRINTLN("⚠️ Consultation ID (CID:) not found in message.");
@@ -1291,9 +1404,15 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     // For now, we'll proceed, but responses might fail to link in central system if CID is missing.
   }
   
-  if (presenceDetector.getPresence()) {
+  bool facultyPresent = presenceDetector.getPresence();
+  DEBUG_PRINTF("👤 Faculty presence check: %s\n", facultyPresent ? "PRESENT" : "AWAY");
+  
+  if (facultyPresent) {
     lastReceivedMessage = messageContent; // Store the full message for display
+    DEBUG_PRINTF("💾 Stored message in lastReceivedMessage: '%s'\n", lastReceivedMessage.c_str());
+    DEBUG_PRINTLN("📱 Calling displayIncomingMessage()");
     displayIncomingMessage(messageContent); // Display the full message
+    DEBUG_PRINTF("🎯 Message display state - messageDisplayed: %s\n", messageDisplayed ? "TRUE" : "FALSE");
   } else {
     DEBUG_PRINTLN("📭 Message ignored - Professor is AWAY");
   }
@@ -1609,33 +1728,72 @@ void setup() {
 // MAIN LOOP WITH GRACE PERIOD BLE SCANNER
 // ================================
 void loop() {
-  // Update button states
-  buttons.update();
+  // Add loop timing monitoring for button debugging
+  unsigned long loopStart = millis();
+  static unsigned long lastLoopTime = 0;
+  static unsigned long maxLoopTime = 0;
+  static unsigned long loopCount = 0;
+
+  // PRIORITY 1: Update button states FIRST and FREQUENTLY
+  // Run button updates multiple times per main loop to catch quick presses
+  for (int i = 0; i < 5; i++) {
+    buttons.update();
+    
+    // Handle button presses immediately
+    if (buttons.isButtonAPressed()) {
+      DEBUG_PRINTLN("🎯 BUTTON A PRESS DETECTED IN MAIN LOOP!");
+      handleAcknowledgeButton();
+      break; // Exit loop if button handled
+    }
+
+    if (buttons.isButtonBPressed()) {
+      DEBUG_PRINTLN("🎯 BUTTON B PRESS DETECTED IN MAIN LOOP!");
+      handleBusyButton();
+      break; // Exit loop if button handled
+    }
+    
+    delay(2); // Small delay between button checks
+  }
 
   // Handle button presses
-  if (buttons.isButtonAPressed()) {
-    handleAcknowledgeButton();
+  static unsigned long lastButtonCheck = 0;
+  static int buttonCheckCount = 0;
+  
+  // Debug button checking frequency every 100 checks
+  buttonCheckCount++;
+  if (buttonCheckCount % 100 == 0) {
+    unsigned long checkInterval = millis() - lastButtonCheck;
+    DEBUG_PRINTF("🔍 Button check #%d - last 100 checks took %lu ms (avg: %.1f ms per check)\n", 
+                 buttonCheckCount, checkInterval, (float)checkInterval / 100.0);
+    lastButtonCheck = millis();
   }
 
-  if (buttons.isButtonBPressed()) {
-    handleBusyButton();
+  // REST OF MAIN LOOP - Run less frequently to speed up button response
+  static unsigned long lastSlowOperations = 0;
+  if (millis() - lastSlowOperations > 100) { // Only run slow operations every 100ms
+    
+    checkWiFiConnection();
+
+    if (wifiConnected && !mqttClient.connected()) {
+      connectMQTT();
+    }
+
+    if (mqttConnected) {
+      mqttClient.loop();
+    }
+
+    // Update offline queue system
+    updateOfflineQueue();
+
+    lastSlowOperations = millis();
   }
 
-  checkWiFiConnection();
-
-  if (wifiConnected && !mqttClient.connected()) {
-    connectMQTT();
+  // ADAPTIVE BLE SCANNING - Run less frequently
+  static unsigned long lastBLEScan = 0;
+  if (millis() - lastBLEScan > 1000) { // Only scan every 1 second instead of every loop
+    adaptiveScanner.update();
+    lastBLEScan = millis();
   }
-
-  if (mqttConnected) {
-    mqttClient.loop();
-  }
-
-  // Update offline queue system
-  updateOfflineQueue();
-
-  // ADAPTIVE BLE SCANNING WITH GRACE PERIOD (Replaces old performBLEScan)
-  adaptiveScanner.update();
 
   // Update time every 5 seconds
   static unsigned long lastTimeUpdate = 0;
@@ -1659,7 +1817,11 @@ void loop() {
   }
 
   // Periodic time sync check
-  checkPeriodicTimeSync();
+  static unsigned long lastTimeSyncCheck = 0;
+  if (millis() - lastTimeSyncCheck > 30000) { // Only check every 30 seconds
+    checkPeriodicTimeSync();
+    lastTimeSyncCheck = millis();
+  }
 
   // Simple animation toggle every 800ms
   static unsigned long lastIndicatorUpdate = 0;
@@ -1671,7 +1833,33 @@ void loop() {
     lastIndicatorUpdate = millis();
   }
 
-  delay(100);
+  // Loop timing analysis
+  unsigned long loopTime = millis() - loopStart;
+  loopCount++;
+  
+  if (loopTime > maxLoopTime) {
+    maxLoopTime = loopTime;
+  }
+  
+  // Log slow loops that could interfere with button processing
+  if (loopTime > 50) {  // Reduced threshold from 200ms to 50ms
+    DEBUG_PRINTF("⚠️ Slow loop detected: %lu ms (could affect button response)\n", loopTime);
+  }
+  
+  // Report loop performance every 30 seconds
+  static unsigned long lastLoopReport = 0;
+  if (millis() - lastLoopReport > 30000) {
+    DEBUG_PRINTF("🔧 Loop Performance: Max=%lu ms, Avg=%.1f ms, Count=%lu\n", 
+                maxLoopTime, 
+                (float)(millis() - lastLoopTime) / loopCount,
+                loopCount);
+    maxLoopTime = 0;  // Reset max
+    loopCount = 0;    // Reset count
+    lastLoopTime = millis();
+    lastLoopReport = millis();
+  }
+
+  delay(5); // Reduced from 10ms to 5ms for faster button response
 }
 
 // ================================
