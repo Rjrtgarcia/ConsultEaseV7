@@ -149,7 +149,7 @@ class AdminDashboardWindow(BaseWindow):
 
     def logout(self):
         """
-        Handle logout button click.
+        Handle logout button click with proper cleanup and form clearing.
         """
         logger.info("Admin logging out")
 
@@ -163,6 +163,28 @@ class AdminDashboardWindow(BaseWindow):
                     self.student_tab.scan_dialog.close()
         except Exception as e:
             logger.error(f"Error during admin logout cleanup: {str(e)}")
+
+        # Clear admin authentication state in the controller
+        try:
+            # Get the admin controller from the main application if available
+            if hasattr(self.parent(), 'admin_controller'):
+                self.parent().admin_controller.logout()
+            
+            # Clear login attempt tracking
+            if hasattr(self.parent(), '_admin_login_attempts'):
+                self.parent()._admin_login_attempts.clear()
+                logger.debug("Cleared admin login attempt tracking on logout")
+                
+        except Exception as e:
+            logger.error(f"Error clearing admin authentication state: {str(e)}")
+
+        # Clear the admin login form if it exists
+        try:
+            if hasattr(self.parent(), 'admin_login_window') and self.parent().admin_login_window:
+                self.parent().admin_login_window.clear_login_form()
+                logger.debug("Cleared admin login form on logout")
+        except Exception as e:
+            logger.error(f"Error clearing admin login form: {str(e)}")
 
         # Hide this window
         self.hide()

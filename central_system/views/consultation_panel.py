@@ -280,6 +280,7 @@ class ConsultationRequestForm(QFrame):
     def set_faculty(self, faculty):
         """
         Set the faculty for the consultation request.
+        Fixed to prevent jarring tab shifting.
         """
         self.faculty = faculty
 
@@ -544,18 +545,22 @@ class ConsultationHistoryPanel(QFrame):
         self.consultation_table = QTableWidget()
         self.consultation_table.setColumnCount(5)
         self.consultation_table.setHorizontalHeaderLabels(["Faculty", "Course", "Status", "Date", "Actions"])
-        # self.consultation_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch) # Old: Stretch all
 
-        # New: Set specific resize modes
+        # Improved column sizing to ensure action buttons are fully visible
         header = self.consultation_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Faculty
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Course
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Status
-        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Date
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Actions
-        # Optionally, set a minimum width for the Actions column if ResizeToContents is still too small due to button styles
-        # header.setMinimumSectionSize(120) # Example: Minimum width for any column
-        # self.consultation_table.setColumnWidth(4, 150) # Alternative: fixed width for Actions
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Faculty - stretch to fill
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Course - fit content
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Status - fit content
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Date - fit content
+        header.setSectionResizeMode(4, QHeaderView.Fixed) # Actions - fixed width
+        
+        # Set minimum widths for better button visibility
+        header.setMinimumSectionSize(100)  # Minimum width for any column
+        self.consultation_table.setColumnWidth(4, 180)  # Fixed width for Actions column to ensure buttons fit
+        
+        # Set minimum row height to accommodate buttons properly
+        self.consultation_table.verticalHeader().setDefaultSectionSize(50)  # Increase row height
+        self.consultation_table.verticalHeader().setMinimumSectionSize(45)  # Minimum row height
 
         self.consultation_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.consultation_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -745,22 +750,64 @@ class ConsultationHistoryPanel(QFrame):
             # Actions
             actions_cell = QWidget()
             actions_layout = QHBoxLayout(actions_cell)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
+            actions_layout.setContentsMargins(5, 5, 5, 5)  # Increased margins for better spacing
+            actions_layout.setSpacing(8)  # Add spacing between buttons
 
-            # View details button
+            # View details button with improved sizing
             view_button = QPushButton("View")
-            view_button.setStyleSheet("background-color: #3498db; color: white;")
+            view_button.setFixedSize(60, 35)  # Fixed size to ensure consistent button appearance
+            view_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498db; 
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 12pt;
+                    font-weight: bold;
+                    padding: 5px 10px;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+                QPushButton:pressed {
+                    background-color: #21618c;
+                }
+            """)
             # Use a better lambda that ignores the checked parameter
             view_button.clicked.connect(lambda _, c=consultation: self.view_consultation_details(c))
             actions_layout.addWidget(view_button)
 
-            # Cancel button (only for pending consultations)
+            # Cancel button (only for pending consultations) with improved sizing
             if consultation.status.value == "pending":
                 cancel_button = QPushButton("Cancel")
-                cancel_button.setStyleSheet("background-color: #e74c3c; color: white;")
+                cancel_button.setFixedSize(70, 35)  # Fixed size to ensure consistent button appearance
+                cancel_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #e74c3c; 
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-size: 12pt;
+                        font-weight: bold;
+                        padding: 5px 10px;
+                    }
+                    QPushButton:hover {
+                        background-color: #c0392b;
+                    }
+                    QPushButton:pressed {
+                        background-color: #a93226;
+                    }
+                """)
                 # Use a better lambda that ignores the checked parameter
                 cancel_button.clicked.connect(lambda _, c=consultation: self.cancel_consultation(c))
                 actions_layout.addWidget(cancel_button)
+
+            # Add stretch to center buttons if only one button is present
+            actions_layout.addStretch()
+
+            # Set size policy for proper widget sizing
+            actions_cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            actions_cell.setMinimumHeight(40)  # Ensure minimum height for button visibility
 
             self.consultation_table.setCellWidget(row_position, 4, actions_cell)
 
@@ -1028,6 +1075,8 @@ class ConsultationPanel(QTabWidget):
             QTabWidget#consultation_panel {
                 background-color: #f8f9fa;
                 border: none;
+                padding: 0px;
+                margin: 0px;
             }
 
             QTabWidget::pane {
@@ -1035,6 +1084,8 @@ class ConsultationPanel(QTabWidget):
                 border-radius: 8px;
                 background-color: #f8f9fa;
                 padding: 5px;
+                position: relative;
+                top: 0px;  /* Ensure stable positioning */
             }
 
             QTabBar::tab {
@@ -1049,6 +1100,8 @@ class ConsultationPanel(QTabWidget):
                 font-size: 15pt;
                 font-weight: bold;
                 min-width: 200px;
+                min-height: 20px;  /* Ensure consistent tab height */
+                position: relative;  /* Prevent floating */
             }
 
             QTabBar::tab:selected {
@@ -1056,14 +1109,23 @@ class ConsultationPanel(QTabWidget):
                 color: white;
                 border: 1px solid #1971c2;
                 border-bottom: none;
+                position: relative;  /* Maintain position when selected */
             }
 
             QTabBar::tab:hover:!selected {
                 background-color: #dee2e6;
+                transition: background-color 0.2s ease;  /* Smooth hover transition */
             }
 
             QTabWidget::tab-bar {
                 alignment: center;
+                position: fixed;  /* Prevent tab bar from moving */
+            }
+            
+            /* Ensure stable layout during interactions */
+            QTabBar {
+                qproperty-drawBase: false;
+                outline: 0;  /* Remove focus outline that can cause shifting */
             }
         """
 
@@ -1133,11 +1195,42 @@ class ConsultationPanel(QTabWidget):
     def set_faculty(self, faculty):
         """
         Set the faculty for the consultation request.
+        Fixed to prevent jarring tab shifting.
         """
         self.request_form.set_faculty(faculty)
 
-        # Animate transition to request form tab
-        self.animate_tab_change(0)
+        # Switch to request form tab smoothly without animation
+        # Only animate if we're not already on the request tab
+        if self.currentIndex() != 0:
+            # Set tab directly for immediate, stable transition
+            self.setCurrentIndex(0)
+            
+            # Optional: Add a very subtle visual feedback without movement
+            try:
+                from PyQt5.QtCore import QTimer
+                from PyQt5.QtGui import QColor
+                
+                # Brief highlight effect on the tab without position changes
+                def highlight_tab():
+                    tab_bar = self.tabBar()
+                    original_color = tab_bar.palette().color(tab_bar.foregroundRole())
+                    
+                    # Set a subtle highlight
+                    tab_bar.setTabTextColor(0, QColor("#228be6"))
+                    
+                    # Reset after very brief moment
+                    def reset_color():
+                        tab_bar.setTabTextColor(0, original_color)
+                    
+                    QTimer.singleShot(150, reset_color)
+                
+                # Apply highlight after a tiny delay to ensure tab switch is complete
+                QTimer.singleShot(50, highlight_tab)
+                
+            except Exception as e:
+                # If any issues with highlight, just ignore
+                logger.debug(f"Tab highlight effect skipped: {e}")
+                pass
 
     def set_faculty_options(self, faculty_list):
         """
@@ -1342,6 +1435,7 @@ class ConsultationPanel(QTabWidget):
     def animate_tab_change(self, tab_index):
         """
         Animate the transition to a different tab with enhanced visual effects.
+        Fixed to prevent jarring tab shifting and ensure stable navigation.
 
         Args:
             tab_index (int): The index of the tab to switch to
@@ -1349,30 +1443,41 @@ class ConsultationPanel(QTabWidget):
         # Import animation classes if available
         try:
             from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup
+            from PyQt5.QtGui import QColor
 
-            # Create a property animation for the tab widget
-            pos_animation = QPropertyAnimation(self, b"pos")
-            pos_animation.setDuration(300)  # 300ms animation
-            pos_animation.setStartValue(self.pos() + QPoint(10, 0))  # Slight offset
-            pos_animation.setEndValue(self.pos())  # Original position
-            pos_animation.setEasingCurve(QEasingCurve.OutCubic)  # Smooth curve
-
-            # Create a parallel animation group
-            animation_group = QParallelAnimationGroup()
-            animation_group.addAnimation(pos_animation)
-
-            # Start the animation
-            animation_group.start()
-
-            # Set the current tab
+            # Set the current tab immediately to prevent shifting
             self.setCurrentIndex(tab_index)
+
+            # Create a gentle highlight animation on the tab instead of moving the whole widget
+            try:
+                current_tab = self.tabBar()
+                original_color = current_tab.palette().color(current_tab.foregroundRole())
+
+                # Create a subtle color transition instead of position animation
+                def create_highlight_effect():
+                    # Set highlight color
+                    highlight_color = QColor("#228be6")
+                    current_tab.setTabTextColor(tab_index, highlight_color)
+                    
+                    # Reset after a brief moment
+                    def reset_color():
+                        current_tab.setTabTextColor(tab_index, original_color)
+                    
+                    # Use shorter duration to prevent jarring effects
+                    QTimer.singleShot(200, reset_color)
+
+                create_highlight_effect()
+
+            except Exception as animation_error:
+                # If animation fails, just change tab without effects
+                logger.debug(f"Tab animation fallback: {animation_error}")
+                pass
 
         except ImportError:
-            # If animation classes are not available, use simpler animation
-            # Set the current tab
+            # If animation classes are not available, just change the tab smoothly
             self.setCurrentIndex(tab_index)
 
-            # Flash the tab briefly to draw attention
+            # Simple flash effect without position changes
             try:
                 current_style = self.tabBar().tabTextColor(tab_index)
 
@@ -1380,11 +1485,11 @@ class ConsultationPanel(QTabWidget):
                 def reset_color():
                     self.tabBar().setTabTextColor(tab_index, current_style)
 
-                # Set highlight color
+                # Set highlight color briefly
                 self.tabBar().setTabTextColor(tab_index, QColor("#228be6"))
 
-                # Reset after a short delay
-                QTimer.singleShot(500, reset_color)
+                # Reset after a short delay (reduced from 500ms to 200ms)
+                QTimer.singleShot(200, reset_color)
             except:
                 # If even this fails, just change the tab without animation
                 pass

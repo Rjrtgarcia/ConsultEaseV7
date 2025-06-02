@@ -809,7 +809,7 @@ class ConsultEaseApp:
 
     def handle_admin_authenticated(self, credentials):
         """
-        Handle admin authentication event.
+        Handle admin authentication event with improved retry logic and user feedback.
 
         Args:
             credentials (tuple): Admin credentials (username, password) or (username, None) for auto-login
@@ -827,12 +827,32 @@ class ConsultEaseApp:
             self.show_admin_dashboard_window(admin_info)
             return
 
+        # Track login attempts for better user experience
+        if not hasattr(self, '_admin_login_attempts'):
+            self._admin_login_attempts = {}
+        
+        # Initialize attempt counter for this user if not exists
+        if username not in self._admin_login_attempts:
+            self._admin_login_attempts[username] = {
+                'count': 0,
+                'last_attempt': None
+            }
+
+        # Increment attempt counter
+        self._admin_login_attempts[username]['count'] += 1
+        self._admin_login_attempts[username]['last_attempt'] = username
+        current_attempts = self._admin_login_attempts[username]['count']
+
         # Normal authentication flow
         auth_result = self.admin_controller.authenticate(username, password)
 
         if auth_result:
             admin = auth_result['admin']
             logger.info(f"Admin authenticated: {username}")
+            
+            # Reset login attempts on successful authentication
+            if username in self._admin_login_attempts:
+                del self._admin_login_attempts[username]
 
             # Check if password change is required
             if auth_result.get('requires_password_change', False):
@@ -847,15 +867,43 @@ class ConsultEaseApp:
             }
             self.show_admin_dashboard_window(admin_info)
         else:
-            logger.warning(f"Admin authentication failed: {username}")
+            logger.warning(f"Admin authentication failed: {username} (attempt {current_attempts})")
+            
             if self.admin_login_window:
                 # Check if this might be a first-time setup issue
                 if not self.admin_controller.check_valid_admin_accounts_exist():
+                    self._admin_login_attempts[username]['count'] = 0  # Reset attempts for setup issues
                     self.admin_login_window.show_login_error(
                         "No valid admin accounts found. Please check the first-time setup."
                     )
                 else:
-                    self.admin_login_window.show_login_error("Invalid username or password")
+                    # Provide progressive feedback based on attempt count
+                    if current_attempts == 1:
+                        error_message = "Invalid username or password. Please try again."
+                    elif current_attempts == 2:
+                        error_message = "Invalid credentials. Please check your username and password carefully."
+                    elif current_attempts == 3:
+                        error_message = "Authentication failed multiple times. Please verify your credentials."
+                    elif current_attempts >= 4:
+                        error_message = "Multiple authentication failures detected. Please contact an administrator if you've forgotten your credentials."
+                    else:
+                        error_message = "Invalid username or password."
+                    
+                    self.admin_login_window.show_login_error(error_message)
+                    
+                    # Log security event for multiple failed attempts
+                    if current_attempts >= 3:
+                        logger.warning(f"Security Alert: {current_attempts} failed login attempts for admin user: {username}")
+                        try:
+                            from ..utils.audit_logger import log_authentication
+                            log_authentication(username, False, details=f"Multiple failed attempts ({current_attempts})")
+                        except ImportError:
+                            logger.debug("Audit logger not available")
+                    
+                    # Optional: Implement temporary lockout after many attempts
+                    if current_attempts >= 5:
+                        logger.error(f"Too many failed attempts for {username}. Consider implementing account lockout.")
+                        # Could implement a temporary lockout here if needed
 
     def handle_consultation_request(self, faculty, message, course_code):
         """

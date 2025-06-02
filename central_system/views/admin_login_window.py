@@ -187,6 +187,66 @@ class AdminLoginWindow(BaseWindow):
         self.setTabOrder(self.password_input, self.login_button)
         self.setTabOrder(self.login_button, self.back_button)
 
+    def clear_login_form(self):
+        """
+        Clear all login form fields and reset error state.
+        This should be called when logging out or when switching away from admin login.
+        """
+        logger.info("Clearing admin login form")
+        
+        # Clear all input fields
+        self.username_input.clear()
+        self.password_input.clear()
+        
+        # Hide any error messages
+        self.error_label.setVisible(False)
+        self.error_label.setText('')
+        
+        # Reset focus to username field
+        self.username_input.setFocus()
+        
+        # Clear any stored login attempt data in the main application
+        try:
+            if hasattr(self.parent(), '_admin_login_attempts'):
+                self.parent()._admin_login_attempts.clear()
+                logger.debug("Cleared admin login attempt tracking")
+        except Exception as e:
+            logger.debug(f"Could not clear login attempt tracking: {e}")
+
+    def reset_form_state(self):
+        """
+        Reset the form to its initial state.
+        """
+        self.clear_login_form()
+        
+        # Reset first-time setup flag if needed
+        self.first_time_setup_shown = False
+        
+        # Ensure the form is ready for new input
+        self.username_input.setStyleSheet('''
+            QLineEdit {
+                border: 2px solid #ccc;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14pt;
+            }
+            QLineEdit:focus {
+                border: 2px solid #4a86e8;
+            }
+        ''')
+        
+        self.password_input.setStyleSheet('''
+            QLineEdit {
+                border: 2px solid #ccc;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14pt;
+            }
+            QLineEdit:focus {
+                border: 2px solid #4a86e8;
+            }
+        ''')
+
     def focus_password(self):
         """
         Focus on the password input field.
@@ -195,7 +255,7 @@ class AdminLoginWindow(BaseWindow):
 
     def show_login_error(self, message):
         """
-        Show an error message on the login form.
+        Show an error message on the login form with improved user feedback.
 
         Args:
             message (str): The error message to display.
@@ -203,12 +263,47 @@ class AdminLoginWindow(BaseWindow):
         self.error_label.setText(message)
         self.error_label.setVisible(True)
 
-        # Clear the password field for security
+        # Only clear the password field for security, keep username for user convenience
         self.password_input.clear()
+        self.password_input.setFocus()  # Focus on password field for retry
+        
+        # Add visual feedback with subtle color change
+        self.password_input.setStyleSheet('''
+            QLineEdit {
+                border: 2px solid #f44336;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14pt;
+                background-color: #ffeaea;
+            }
+            QLineEdit:focus {
+                border: 2px solid #d32f2f;
+                background-color: white;
+            }
+        ''')
+        
+        # Reset the styling after a short delay
+        QTimer.singleShot(3000, self._reset_password_field_styling)
+
+    def _reset_password_field_styling(self):
+        """
+        Reset the password field styling to normal.
+        """
+        self.password_input.setStyleSheet('''
+            QLineEdit {
+                border: 2px solid #ccc;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14pt;
+            }
+            QLineEdit:focus {
+                border: 2px solid #4a86e8;
+            }
+        ''')
 
     def login(self):
         """
-        Handle login button click.
+        Handle login button click with improved validation and user feedback.
         """
         # Hide any previous error message
         self.error_label.setVisible(False)
@@ -217,10 +312,34 @@ class AdminLoginWindow(BaseWindow):
         username = self.username_input.text().strip()
         password = self.password_input.text()
 
-        # Validate inputs
+        # Validate inputs with better user feedback
         if not username:
             self.show_login_error('Please enter a username')
             self.username_input.setFocus()
+            self.username_input.setStyleSheet('''
+                QLineEdit {
+                    border: 2px solid #f44336;
+                    border-radius: 5px;
+                    padding: 5px 10px;
+                    font-size: 14pt;
+                    background-color: #ffeaea;
+                }
+                QLineEdit:focus {
+                    border: 2px solid #4a86e8;
+                    background-color: white;
+                }
+            ''')
+            QTimer.singleShot(3000, lambda: self.username_input.setStyleSheet('''
+                QLineEdit {
+                    border: 2px solid #ccc;
+                    border-radius: 5px;
+                    padding: 5px 10px;
+                    font-size: 14pt;
+                }
+                QLineEdit:focus {
+                    border: 2px solid #4a86e8;
+                }
+            '''))
             return
 
         if not password:
@@ -228,20 +347,38 @@ class AdminLoginWindow(BaseWindow):
             self.password_input.setFocus()
             return
 
+        # Disable login button temporarily to prevent spam clicking
+        self.login_button.setEnabled(False)
+        self.login_button.setText('Authenticating...')
+        
+        # Re-enable button after a short delay
+        QTimer.singleShot(2000, self._reset_login_button)
+
         # Emit the signal with the credentials as a tuple
         self.admin_authenticated.emit((username, password))
 
+    def _reset_login_button(self):
+        """
+        Reset the login button to its normal state.
+        """
+        self.login_button.setEnabled(True)
+        self.login_button.setText('Login')
+
     def back_to_login(self):
         """
-        Go back to the login screen.
+        Go back to the login screen and clear the form.
         """
+        self.clear_login_form()
         self.change_window.emit('login', None)
 
     def showEvent(self, event):
         """
-        Override showEvent to check for first-time setup.
+        Override showEvent to check for first-time setup and prepare the form.
         """
         super().showEvent(event)
+        
+        # Clear the form when showing the window (important for logout scenario)
+        self.clear_login_form()
 
         # Only check for first-time setup once to prevent multiple dialogs
         if self.first_time_setup_shown:
