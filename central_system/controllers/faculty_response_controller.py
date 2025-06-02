@@ -32,12 +32,25 @@ class FacultyResponseController:
         Start the faculty response controller and subscribe to faculty response topics.
         """
         logger.info("Starting Faculty Response controller")
+        
+        # Add debug logging to confirm subscription setup
+        logger.info("🔔 Subscribing to faculty response topics...")
 
         # Subscribe to faculty response updates using async MQTT service
-        subscribe_to_topic("consultease/faculty/+/responses", self.handle_faculty_response)
+        try:
+            subscribe_to_topic("consultease/faculty/+/responses", self.handle_faculty_response)
+            logger.info("✅ Successfully subscribed to: consultease/faculty/+/responses")
+        except Exception as e:
+            logger.error(f"❌ Failed to subscribe to faculty responses: {e}")
 
         # Subscribe to faculty heartbeat for NTP sync status
-        subscribe_to_topic("consultease/faculty/+/heartbeat", self.handle_faculty_heartbeat)
+        try:
+            subscribe_to_topic("consultease/faculty/+/heartbeat", self.handle_faculty_heartbeat)
+            logger.info("✅ Successfully subscribed to: consultease/faculty/+/heartbeat")
+        except Exception as e:
+            logger.error(f"❌ Failed to subscribe to faculty heartbeat: {e}")
+            
+        logger.info("🎯 Faculty Response Controller started and waiting for messages...")
 
     def stop(self):
         """
@@ -76,16 +89,22 @@ class FacultyResponseController:
             topic (str): MQTT topic
             data (dict or str): Response data
         """
+        # DEBUG: Log every message received to diagnose MQTT connectivity
+        logger.info(f"🔥 FACULTY RESPONSE HANDLER TRIGGERED - Topic: {topic}, Data Type: {type(data)}")
+        logger.info(f"🔥 Raw Data: {data}")
+        
         try:
             # Parse response data
             if isinstance(data, str):
                 try:
                     response_data = json.loads(data)
+                    logger.info(f"🔥 Parsed JSON data: {response_data}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON in faculty response: {data}")
                     return
             elif isinstance(data, dict):
                 response_data = data
+                logger.info(f"🔥 Dict data received: {response_data}")
             else:
                 logger.error(f"Invalid data type for faculty response: {type(data)}")
                 return
@@ -94,6 +113,7 @@ class FacultyResponseController:
             faculty_id = None
             try:
                 faculty_id = int(topic.split("/")[2])
+                logger.info(f"🔥 Extracted faculty ID: {faculty_id}")
             except (IndexError, ValueError):
                 logger.error(f"Could not extract faculty ID from topic: {topic}")
                 return
@@ -131,6 +151,8 @@ class FacultyResponseController:
 
         except Exception as e:
             logger.error(f"Error handling faculty response: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def handle_faculty_heartbeat(self, topic: str, data: Any):
         """
