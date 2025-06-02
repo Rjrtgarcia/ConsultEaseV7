@@ -604,10 +604,8 @@ class DashboardWindow(BaseWindow):
 
                     # Connect consultation signal if it exists
                     if hasattr(card, 'consultation_requested'):
-                        # Ensure we pass the faculty_data dictionary, not an ID
-                        card.consultation_requested.connect(
-                            lambda f_data=faculty_data: self.show_consultation_form_safe(f_data)
-                        )
+                        # Use faculty_data dictionary instead of faculty object to avoid type mismatch
+                        card.consultation_requested.connect(lambda f_data=faculty_data: self.show_consultation_form_safe(f_data))
 
                     # Add card to container
                     container_layout.addWidget(card)
@@ -824,12 +822,13 @@ class DashboardWindow(BaseWindow):
                     # Get pooled faculty card
                     card = self.faculty_card_manager.get_faculty_card(
                         faculty_data,
-                        consultation_callback=lambda f=faculty: self.show_consultation_form(f)
+                        consultation_callback=lambda f_data=faculty_data: self.show_consultation_form_safe(f_data)
                     )
 
                     # Connect consultation signal if it exists
                     if hasattr(card, 'consultation_requested'):
-                        card.consultation_requested.connect(lambda f=faculty: self.show_consultation_form(f))
+                        # Use faculty_data dictionary instead of faculty object to avoid type mismatch
+                        card.consultation_requested.connect(lambda f_data=faculty_data: self.show_consultation_form_safe(f_data))
 
                     # Add card to container
                     container_layout.addWidget(card)
@@ -1060,29 +1059,87 @@ class DashboardWindow(BaseWindow):
 
     def _perform_filter(self):
         """
-        Actually perform the faculty filtering after debounce delay.
+        Perform filtering with proper error handling.
+        """
+        try:
+            from ..controllers import FacultyController
+            
+            filter_text = self.search_input.text().strip().lower()
+            show_available = self.filter_combo.currentData()
+            
+            faculty_controller = FacultyController()
+            faculties = faculty_controller.get_all_faculty()
+            
+            # Convert to safe faculty data format
+            safe_faculties = []
+            for faculty in faculties:
+                faculty_data = {
+                    'id': faculty.id,
+                    'name': faculty.name,
+                    'department': faculty.department,
+                    'available': faculty.status,
+                    'status': 'Available' if faculty.status else 'Unavailable',
+                    'email': faculty.email,
+                    'room': faculty.room
+                }
+                safe_faculties.append(faculty_data)
+            
+            # Apply filters
+            if filter_text:
+                safe_faculties = [f for f in safe_faculties if filter_text in f['name'].lower() or filter_text in f['department'].lower()]
+            
+            if show_available:
+                safe_faculties = [f for f in safe_faculties if f['available']]
+            
+            # Use safe population method
+            self.populate_faculty_grid_safe(safe_faculties)
+            
+        except Exception as e:
+            logger.error(f"Error performing filter: {str(e)}")
+            self._show_error_message(f"Filter error: {str(e)}")
+
+    def refresh_faculty_status(self):
+        """
+        Refresh faculty status with improved error handling and caching.
         """
         try:
             # Import faculty controller
             from ..controllers import FacultyController
 
-            # Get search text and filter value
-            search_text = self.search_input.text().strip()
-            filter_available = self.filter_combo.currentData()
-
             # Get faculty controller
             faculty_controller = FacultyController()
 
-            # Get filtered faculty list
-            faculties = faculty_controller.get_all_faculty(
-                filter_available=filter_available,
-                search_term=search_text
-            )
+            # Get all faculty
+            faculties = faculty_controller.get_all_faculty()
 
-            # Update the grid
-            self.populate_faculty_grid(faculties)
+            # Convert to safe faculty data format
+            safe_faculties = []
+            for faculty in faculties:
+                faculty_data = {
+                    'id': faculty.id,
+                    'name': faculty.name,
+                    'department': faculty.department,
+                    'available': faculty.status,
+                    'status': 'Available' if faculty.status else 'Unavailable',
+                    'email': faculty.email,
+                    'room': faculty.room
+                }
+                safe_faculties.append(faculty_data)
 
-            # Also update the consultation panel with the latest faculty options
+            # Check if data has changed before updating
+            new_hash = self._extract_safe_faculty_data(safe_faculties)
+            if hasattr(self, '_last_faculty_hash') and self._last_faculty_hash == new_hash:
+                logger.debug("Faculty data unchanged, skipping UI update")
+                return
+
+            # Update the grid using safe method
+            self.populate_faculty_grid_safe(safe_faculties)
+
+            # Store current faculty data for future comparison
+            self._last_faculty_data_list = safe_faculties
+            self._last_faculty_hash = new_hash
+
+            # Also update the consultation panel with the latest faculty options (convert back to objects)
             if hasattr(self, 'consultation_panel'):
                 self.consultation_panel.set_faculty_options(faculties)
                 logger.debug("Refreshed consultation panel faculty options in refresh_faculty_status")
@@ -1091,101 +1148,9 @@ class DashboardWindow(BaseWindow):
             if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
                 self.faculty_scroll.verticalScrollBar().setValue(0)
 
-            # Update current faculty data hash for future comparisons
-            self._last_faculty_hash = self._extract_faculty_data(faculties)
-
         except Exception as e:
-            # Ensure no local logger definition or import here
-            logger.error(f"Error filtering faculty: {str(e)}")
-            self.show_notification("Error filtering faculty list", "error")
-
-    def refresh_faculty_status(self):
-        """
-        Refresh the faculty status from the server with optimizations to reduce loading indicators.
-        Implements adaptive refresh rate based on activity.
-        """
-        try:
-            # Store current scroll position to restore it later
-            current_scroll_position = 0
-            if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
-                current_scroll_position = self.faculty_scroll.verticalScrollBar().value()
-
-            # Show loading indicator for initial load or significant delays
-            if not hasattr(self, '_last_faculty_hash') or self._last_faculty_hash is None:
-                self._show_loading_indicator()
-
-            # Import faculty controller
-            from ..controllers import FacultyController
-
-            # Get current filter settings
-            search_text = self.search_input.text().strip()
-            filter_available = self.filter_combo.currentData()
-
-            # Get faculty controller
-            faculty_controller = FacultyController()
-
-            # Get updated faculty list with current filters
-            faculties = faculty_controller.get_all_faculty(
-                filter_available=filter_available,
-                search_term=search_text
-            )
-
-            # Use smart refresh manager for adaptive refresh rates
-            faculty_hash = self._extract_faculty_data(faculties)
-            new_interval = self.smart_refresh.update_refresh_rate(faculty_hash)
-
-            # Update timer interval if it changed
-            if new_interval != self.refresh_timer.interval():
-                self.refresh_timer.setInterval(new_interval)
-                logger.debug(f"Adjusted refresh interval to {new_interval/1000} seconds")
-
-            # Check if data has changed
-            if self._last_faculty_hash == faculty_hash:
-                logger.debug("No faculty status changes detected, skipping UI update")
-                return
-
-            # Store the new faculty data hash
-            self._last_faculty_hash = faculty_hash
-
-            # Hide loading indicator before updating grid
-            self._hide_loading_indicator()
-
-            # Update the grid only if there are changes or this is the first load
-            self.populate_faculty_grid(faculties)
-
-            # Also update the consultation panel with the latest faculty options
-            if hasattr(self, 'consultation_panel'):
-                self.consultation_panel.set_faculty_options(faculties)
-                logger.debug("Refreshed consultation panel faculty options in refresh_faculty_status")
-
-            # Restore previous scroll position instead of always scrolling to top
-            if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
-                self.faculty_scroll.verticalScrollBar().setValue(current_scroll_position)
-
-            # Also refresh consultation history if student is logged in, but less frequently
-            current_time = time.time()
-            # Only refresh history every 3 minutes (180 seconds) - increased from 2 minutes
-            if self.student and (current_time - getattr(self, '_last_history_refresh', 0) > 180):
-                self.consultation_panel.refresh_history()
-                self._last_history_refresh = current_time
-
-        except Exception as e:
-            # Ensure no local logger definition or import here
             logger.error(f"Error refreshing faculty status: {str(e)}")
-
-            # Hide loading indicator on error
-            self._hide_loading_indicator()
-
-            # Show error message in faculty grid
-            self._show_error_message(f"Error loading faculty data: {str(e)}")
-
-            # Only show notification for serious errors, not for every refresh issue
-            if "Connection refused" in str(e) or "Database error" in str(e):
-                self.show_notification("Error refreshing faculty status", "error")
-
-            # Reset consecutive no-change counter on errors to ensure we don't slow down too much
-            if hasattr(self, '_consecutive_no_changes'):
-                self._consecutive_no_changes = 0
+            self._show_error_message(f"Failed to refresh faculty list: {str(e)}")
 
     def _extract_faculty_data(self, faculties):
         """
@@ -1554,49 +1519,44 @@ class DashboardWindow(BaseWindow):
 
     def _perform_initial_faculty_load(self):
         """
-        Perform the initial faculty data load when the dashboard is first shown.
+        Perform the initial load of faculty data.
         """
         try:
-            logger.info("Performing initial faculty data load")
-
-            # Import faculty controller
             from ..controllers import FacultyController
 
-            # Get faculty controller
             faculty_controller = FacultyController()
-
-            # Get all faculty members
-            logger.info("Attempting to call faculty_controller.get_all_faculty()")
             faculties = faculty_controller.get_all_faculty()
-            logger.info(f"Call to faculty_controller.get_all_faculty() completed. Found {len(faculties) if faculties is not None else 'None'} faculties.")
 
-            logger.info(f"Initial load: Found {len(faculties)} faculty members")
-
-            # Debug: Log each faculty member
+            # Convert to safe faculty data format
+            safe_faculties = []
             for faculty in faculties:
-                logger.debug(f"Faculty found: {faculty.name} (ID: {faculty.id}, Status: {faculty.status}, Department: {faculty.department})")
+                faculty_data = {
+                    'id': faculty.id,
+                    'name': faculty.name,
+                    'department': faculty.department,
+                    'available': faculty.status,
+                    'status': 'Available' if faculty.status else 'Unavailable',
+                    'email': faculty.email,
+                    'room': faculty.room
+                }
+                safe_faculties.append(faculty_data)
 
-            # Populate the faculty grid
-            self.populate_faculty_grid(faculties)
-
-            # Also update the consultation panel with faculty options
-            if hasattr(self, 'consultation_panel'):
-                self.consultation_panel.set_faculty_options(faculties)
-                logger.debug("Updated consultation panel with faculty options")
-
-            # Ensure scroll area starts at the top
-            if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
-                self.faculty_scroll.verticalScrollBar().setValue(0)
-                logger.debug("Reset scroll position to top")
-
-            logger.info("Initial faculty data load completed successfully")
+            if safe_faculties:
+                self.populate_faculty_grid_safe(safe_faculties)
+                self._last_faculty_data_list = safe_faculties
+                self._last_faculty_hash = self._extract_safe_faculty_data(safe_faculties)
+                
+                # Update consultation panel options with object versions
+                if hasattr(self, 'consultation_panel'):
+                    self.consultation_panel.set_faculty_options(faculties)
+            else:
+                self._show_empty_faculty_message()
 
         except Exception as e:
-            logger.error(f"Error during initial faculty data load: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            # Show error message in the faculty grid
-            self._show_error_message(f"Error loading faculty data: {str(e)}")
+            logger.error(f"Error in initial faculty load: {str(e)}")
+            self._show_error_message(f"Failed to load faculty data: {str(e)}")
+        finally:
+            self._hide_loading_indicator()
 
     def closeEvent(self, event):
         """

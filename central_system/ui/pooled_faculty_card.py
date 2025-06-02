@@ -184,7 +184,7 @@ class PooledFacultyCard(QWidget):
             is_available = bool(self.faculty_data.get('available', False))
         else:
             # Fallback to status-based availability
-            is_available = status.lower() == 'available'
+        is_available = status.lower() == 'available'
         
         self.consult_button.setEnabled(is_available)
 
@@ -239,7 +239,7 @@ class PooledFacultyCard(QWidget):
                 else:
                     # Fallback: pass faculty_id if faculty_data is not available
                     logger.warning(f"Faculty data not available for ID {self.faculty_id}, passing ID only")
-                    self.consultation_callback(self.faculty_id)
+                self.consultation_callback(self.faculty_id)
             except Exception as e:
                 logger.error(f"Error in consultation callback: {e}")
                 import traceback

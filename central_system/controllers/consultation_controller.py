@@ -73,10 +73,9 @@ class ConsultationController:
         Returns:
             Consultation: New consultation object or None if error
         """
+        db = get_db()
         try:
             logger.info(f"Creating new consultation request (Student: {student_id}, Faculty: {faculty_id})")
-
-            db = get_db()
 
             # Create new consultation
             consultation = Consultation(
@@ -106,16 +105,25 @@ class ConsultationController:
                 else:
                     logger.error(f"Failed to publish or queue consultation request {consultation.id}")
 
-            # Invalidate consultation cache for the student
-            invalidate_consultation_cache(student_id)
+            # Invalidate consultation cache for both student and faculty
+            try:
+                invalidate_consultation_cache(student_id)
+                invalidate_consultation_cache(faculty_id)
+            except Exception as e:
+                logger.warning(f"Failed to invalidate consultation cache: {str(e)}")
 
             # Notify callbacks
             self._notify_callbacks(consultation)
 
             return consultation
+
         except Exception as e:
             logger.error(f"Error creating consultation: {str(e)}")
+            db.rollback()
             return None
+        finally:
+            # ✅ FIXED: Ensure database session is always closed
+            db.close()
 
     def _publish_consultation(self, consultation):
         """
@@ -201,13 +209,16 @@ class ConsultationController:
         Returns:
             Consultation: Updated consultation object or None if error
         """
+        db = get_db()
         try:
-            db = get_db()
             consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
 
             if not consultation:
                 logger.error(f"Consultation not found: {consultation_id}")
                 return None
+
+            # Store old status for logging
+            old_status = consultation.status
 
             # Update status and timestamp
             consultation.status = status
@@ -224,18 +235,31 @@ class ConsultationController:
 
             db.commit()
 
-            logger.info(f"Updated consultation status: {consultation.id} -> {status}")
+            logger.info(f"✅ Updated consultation status: {consultation.id} ({old_status.value} -> {status.value})")
 
-            # Publish updated consultation
-            self._publish_consultation(consultation)
+            # ✅ FIXED: Don't republish consultation as this confuses the faculty desk unit
+            # The faculty already responded, no need to send it back to them
+            
+            # ✅ ENHANCED: Invalidate cache for both student and faculty
+            try:
+                invalidate_consultation_cache(consultation.student_id)
+                invalidate_consultation_cache(consultation.faculty_id)
+                logger.debug(f"Invalidated consultation cache for student {consultation.student_id} and faculty {consultation.faculty_id}")
+            except Exception as e:
+                logger.warning(f"Failed to invalidate consultation cache: {str(e)}")
 
-            # Notify callbacks
+            # Notify callbacks with the updated consultation
             self._notify_callbacks(consultation)
 
             return consultation
+
         except Exception as e:
             logger.error(f"Error updating consultation status: {str(e)}")
+            db.rollback()
             return None
+        finally:
+            # ✅ CRITICAL FIX: Always close the database session
+            db.close()
 
     def cancel_consultation(self, consultation_id):
         """
@@ -261,8 +285,8 @@ class ConsultationController:
         Returns:
             list: List of Consultation objects
         """
+        db = get_db()
         try:
-            db = get_db()
             query = db.query(Consultation).options(
                 joinedload(Consultation.faculty),
                 joinedload(Consultation.student)
@@ -285,9 +309,13 @@ class ConsultationController:
             consultations = query.all()
 
             return consultations
+
         except Exception as e:
             logger.error(f"Error getting consultations: {str(e)}")
             return []
+        finally:
+            # ✅ FIXED: Ensure database session is always closed
+            db.close()
 
     def get_consultation_by_id(self, consultation_id):
         """
@@ -299,13 +327,16 @@ class ConsultationController:
         Returns:
             Consultation: Consultation object or None if not found
         """
+        db = get_db()
         try:
-            db = get_db()
             consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
             return consultation
         except Exception as e:
             logger.error(f"Error getting consultation by ID: {str(e)}")
             return None
+        finally:
+            # ✅ FIXED: Ensure database session is always closed
+            db.close()
 
     def test_faculty_desk_connection(self, faculty_id):
         """

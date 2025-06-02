@@ -499,23 +499,31 @@ class RFIDService(QObject):
         Returns:
             bool: True if reconnection successful, False otherwise
         """
-        logger.info("Attempting to reconnect to RFID device...")
+        try:
+            logger.info("Attempting to reconnect to RFID device...")
 
-        # Try to detect and connect to device
-        if self._detect_rfid_device():
-            logger.info("✅ Successfully reconnected to RFID device")
-            self.device_status_changed.emit("connected", "RFID device reconnected")
+            # Try to detect and connect to device
+            if self._detect_rfid_device():
+                logger.info("✅ Successfully reconnected to RFID device")
+                self.device_status_changed.emit("connected", "RFID device reconnected")
 
-            # Restart the reading thread
-            if hasattr(self, 'read_thread') and self.read_thread.is_alive():
-                self.stop()
-                time.sleep(1)
+                # Restart the reading thread
+                if hasattr(self, 'read_thread') and self.read_thread.is_alive():
+                    self.stop()
+                    time.sleep(1)
 
-            self.start()
-            return True
-        else:
-            logger.warning("❌ Could not detect RFID device")
-            self.device_status_changed.emit("disconnected", "RFID device not detected")
+                self.start()
+                return True
+            else:
+                logger.warning("❌ Could not detect RFID device")
+                self.device_status_changed.emit("disconnected", "RFID device not detected")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during RFID device reconnection: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            self.device_status_changed.emit("disconnected", f"Reconnection failed: {str(e)}")
             return False
 
     def refresh_student_data(self):
@@ -540,8 +548,7 @@ class RFIDService(QObject):
                     'id': student.id,
                     'name': student.name,
                     'rfid_uid': student.rfid_uid,
-                    'department': student.department,
-                    'email': student.email
+                    'department': student.department
                 }
                 student_data.append(student_info)
             
