@@ -521,14 +521,17 @@ class DashboardWindow(BaseWindow):
 
     def populate_faculty_grid_safe(self, faculty_data_list):
         """
-        Populate the faculty grid with safe faculty data (no SQLAlchemy objects).
-        This method avoids DetachedInstanceError by working with plain dictionaries.
+        Populate the faculty grid with faculty cards using safe data dictionaries.
+        Optimized for performance with batch processing.
 
         Args:
             faculty_data_list (list): List of faculty data dictionaries
         """
+        # Store faculty data list for later reference
+        self._last_faculty_data_list = faculty_data_list
+        
         # Log faculty data for debugging
-        logger.info(f"Populating faculty grid with {len(faculty_data_list) if faculty_data_list else 0} faculty members (safe mode)")
+        logger.info(f"Populating faculty grid (safe) with {len(faculty_data_list) if faculty_data_list else 0} faculty members")
 
         # Temporarily disable updates to reduce flickering and improve performance
         self.setUpdatesEnabled(False)
@@ -545,17 +548,29 @@ class DashboardWindow(BaseWindow):
 
             # Calculate optimal number of columns based on screen width
             screen_width = QApplication.desktop().screenGeometry().width()
-            card_width = 280  # Updated to match the improved FacultyCard width
+
+            # Fixed card width (matches the width set in FacultyCard)
+            card_width = 280
+
+            # Grid spacing
             spacing = 15
+
+            # Get the actual width of the faculty grid container
             grid_container_width = self.faculty_grid.parentWidget().width()
             if grid_container_width <= 0:
                 grid_container_width = int(screen_width * 0.6)
-            grid_container_width -= 30  # Account for margins
+
+            # Account for grid margins
+            grid_container_width -= 30
+
+            # Calculate how many cards can fit in a row
             max_cols = max(1, int(grid_container_width / (card_width + spacing)))
+
+            # Adjust for very small screens
             if screen_width < 800:
                 max_cols = 1
 
-            # Add faculty cards to grid with centering containers
+            # Add faculty cards to grid
             row, col = 0, 0
             containers = []
 
@@ -563,6 +578,15 @@ class DashboardWindow(BaseWindow):
 
             for faculty_data in faculty_data_list:
                 try:
+                    # Validate faculty_data
+                    if not isinstance(faculty_data, dict):
+                        logger.error(f"Invalid faculty_data type: {type(faculty_data)}")
+                        continue
+                        
+                    if 'id' not in faculty_data or 'name' not in faculty_data:
+                        logger.error(f"Missing required fields in faculty_data: {faculty_data}")
+                        continue
+
                     # Create a container widget to center the card
                     container = QWidget()
                     container.setStyleSheet("background-color: transparent;")
@@ -570,28 +594,20 @@ class DashboardWindow(BaseWindow):
                     container_layout.setContentsMargins(0, 0, 0, 0)
                     container_layout.setAlignment(Qt.AlignCenter)
 
-                    # Convert to format expected by FacultyCard
-                    card_data = {
-                        'id': faculty_data['id'],
-                        'name': faculty_data['name'],
-                        'department': faculty_data['department'],
-                        'available': faculty_data['status'] or faculty_data.get('always_available', False),
-                        'status': 'Available' if (faculty_data['status'] or faculty_data.get('always_available', False)) else 'Unavailable',
-                        'email': faculty_data.get('email', ''),
-                        'room': faculty_data.get('room', None)
-                    }
-
-                    logger.debug(f"Creating card for faculty {faculty_data['name']}: available={card_data['available']}, status={card_data['status']}")
+                    logger.debug(f"Creating card for faculty {faculty_data['name']}: available={faculty_data.get('available', False)}")
 
                     # Get pooled faculty card
                     card = self.faculty_card_manager.get_faculty_card(
-                        card_data,
+                        faculty_data,
                         consultation_callback=lambda f_data=faculty_data: self.show_consultation_form_safe(f_data)
                     )
 
                     # Connect consultation signal if it exists
                     if hasattr(card, 'consultation_requested'):
-                        card.consultation_requested.connect(lambda f_data=faculty_data: self.show_consultation_form_safe(f_data))
+                        # Ensure we pass the faculty_data dictionary, not an ID
+                        card.consultation_requested.connect(
+                            lambda f_data=faculty_data: self.show_consultation_form_safe(f_data)
+                        )
 
                     # Add card to container
                     container_layout.addWidget(card)
@@ -607,10 +623,13 @@ class DashboardWindow(BaseWindow):
                     logger.debug(f"Successfully created card for faculty {faculty_data['name']}")
 
                 except Exception as e:
-                    logger.error(f"Error creating faculty card for {faculty_data.get('name', 'Unknown')}: {e}")
+                    faculty_name = faculty_data.get('name', 'Unknown') if isinstance(faculty_data, dict) else 'Unknown'
+                    logger.error(f"Error creating faculty card for {faculty_name}: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     continue
 
-            # Now add all containers to the grid at once
+            # Add all containers to the grid at once
             for container, r, c in containers:
                 self.faculty_grid.addWidget(container, r, c)
 
@@ -626,23 +645,64 @@ class DashboardWindow(BaseWindow):
         Show consultation form using safe faculty data dictionary.
 
         Args:
-            faculty_data (dict): Faculty data dictionary
+            faculty_data (dict or int): Faculty data dictionary or faculty ID
         """
         try:
+            # Handle case where faculty_data might be an integer (faculty ID)
+            if isinstance(faculty_data, int):
+                logger.debug(f"Received faculty ID {faculty_data}, need to fetch faculty data")
+                # Try to get faculty data from current faculty list
+                faculty_id = faculty_data
+                
+                # Find faculty data in the currently loaded faculty list
+                target_faculty_data = None
+                if hasattr(self, '_last_faculty_data_list') and self._last_faculty_data_list:
+                    for f_data in self._last_faculty_data_list:
+                        if f_data.get('id') == faculty_id:
+                            target_faculty_data = f_data
+                            break
+                
+                if target_faculty_data:
+                    faculty_data = target_faculty_data
+                else:
+                    logger.error(f"Could not find faculty data for ID {faculty_id}")
+                    return
+            
+            # Ensure faculty_data is a dictionary
+            if not isinstance(faculty_data, dict):
+                logger.error(f"Invalid faculty_data type: {type(faculty_data)}. Expected dict or int.")
+                return
+                
+            # Validate required fields
+            required_fields = ['id', 'name']
+            for field in required_fields:
+                if field not in faculty_data:
+                    logger.error(f"Missing required field '{field}' in faculty_data")
+                    return
+
             # Create a mock faculty object for compatibility
             class MockFaculty:
                 def __init__(self, data):
                     self.id = data['id']
                     self.name = data['name']
-                    self.department = data['department']
-                    self.status = data['status']
+                    self.department = data.get('department', 'Unknown Department')
+                    self.status = data.get('status', 'Unknown')
                     self.email = data.get('email', '')
                     self.room = data.get('room', None)
 
             mock_faculty = MockFaculty(faculty_data)
             self.show_consultation_form(mock_faculty)
+            
         except Exception as e:
-            logger.error(f"Error showing consultation form for faculty {faculty_data.get('name', 'Unknown')}: {e}")
+            faculty_name = "Unknown"
+            if isinstance(faculty_data, dict):
+                faculty_name = faculty_data.get('name', 'Unknown')
+            elif isinstance(faculty_data, int):
+                faculty_name = f"Faculty ID {faculty_data}"
+            
+            logger.error(f"Error showing consultation form for faculty {faculty_name}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     def _extract_safe_faculty_data(self, faculty_data_list):
         """

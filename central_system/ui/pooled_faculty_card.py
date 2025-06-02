@@ -137,7 +137,7 @@ class PooledFacultyCard(QWidget):
             faculty_data: Dictionary containing faculty information
             consultation_callback: Callback function for consultation requests
         """
-        self.faculty_data = faculty_data
+        self.faculty_data = faculty_data.copy()  # Store a copy
         self.faculty_id = faculty_data.get('id')
         self.consultation_callback = consultation_callback
         self.is_active = True
@@ -202,15 +202,23 @@ class PooledFacultyCard(QWidget):
             logger.warning("Consultation requested but no faculty ID set")
             return
 
-        # Emit signal
+        # Emit signal with faculty_id (for backward compatibility)
         self.consultation_requested.emit(self.faculty_id)
 
-        # Call callback if provided
+        # Call callback if provided - pass full faculty_data instead of just ID
         if self.consultation_callback:
             try:
-                self.consultation_callback(self.faculty_id)
+                # Pass the full faculty_data dictionary to the callback
+                if self.faculty_data:
+                    self.consultation_callback(self.faculty_data)
+                else:
+                    # Fallback: pass faculty_id if faculty_data is not available
+                    logger.warning(f"Faculty data not available for ID {self.faculty_id}, passing ID only")
+                    self.consultation_callback(self.faculty_id)
             except Exception as e:
                 logger.error(f"Error in consultation callback: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
 
     def reset(self):
         """Reset the card to default state for pooling."""
