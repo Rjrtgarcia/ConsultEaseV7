@@ -184,7 +184,7 @@ class PooledFacultyCard(QWidget):
             is_available = bool(self.faculty_data.get('available', False))
         else:
             # Fallback to status-based availability
-        is_available = status.lower() == 'available'
+            is_available = status.lower() == 'available'
         
         self.consult_button.setEnabled(is_available)
 
