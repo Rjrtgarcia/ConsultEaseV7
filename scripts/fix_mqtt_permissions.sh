@@ -1,17 +1,17 @@
 #!/bin/bash
-"""
-MQTT Broker Permission Fix Script for ConsultEase
-Fixes the asymmetric permissions issue where ESP32 can subscribe but cannot publish
-
-This script:
-1. Checks current Mosquitto configuration
-2. Creates proper user accounts and permissions  
-3. Sets up ACL for faculty desk units
-4. Tests the configuration
-5. Restarts services
-
-Usage: sudo bash scripts/fix_mqtt_permissions.sh
-"""
+#
+# MQTT Broker Permission Fix Script for ConsultEase
+# Fixes the asymmetric permissions issue where ESP32 can subscribe but cannot publish
+#
+# This script:
+# 1. Checks current Mosquitto configuration
+# 2. Creates proper user accounts and permissions  
+# 3. Sets up ACL for faculty desk units
+# 4. Tests the configuration
+# 5. Restarts services
+#
+# Usage: sudo bash scripts/fix_mqtt_permissions.sh
+#
 
 set -e  # Exit on any error
 
@@ -56,7 +56,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 print_status "🚀 Starting MQTT Broker Permission Fix..."
-echo "=" * 60
+echo "================================================================"
 
 # Step 1: Check if Mosquitto is installed
 print_status "📦 Checking Mosquitto installation..."
@@ -259,7 +259,7 @@ fi
 # Step 10: Display connection information
 echo ""
 print_status "📋 MQTT Broker Configuration Summary"
-echo "=" * 60
+echo "================================================================"
 echo "🏠 Broker Address: localhost (127.0.0.1)"
 echo "🔌 Port: 1883"
 echo "👤 Central System User: $CENTRAL_USER"

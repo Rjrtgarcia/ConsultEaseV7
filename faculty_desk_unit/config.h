@@ -12,12 +12,12 @@
 #define FACULTY_DEPARTMENT "Helpdesk"
 
 // ===== REQUIRED NETWORK SETTINGS =====
-#define WIFI_SSID "Rods"
-#define WIFI_PASSWORD "asdfghjkl"
-#define MQTT_SERVER "172.20.10.8"
+#define WIFI_SSID "HUAWEI-2.4G-37Pf"
+#define WIFI_PASSWORD "7981526rtg"
+#define MQTT_SERVER "192.168.100.3"
 #define MQTT_PORT 1883
-#define MQTT_USERNAME "faculty_desk"
-#define MQTT_PASSWORD "desk_password"
+#define MQTT_USERNAME ""
+#define MQTT_PASSWORD ""
 
 // ===== REQUIRED BLE BEACON SETTINGS =====
 #define FACULTY_BEACON_MAC "51:00:25:04:02:A2"
@@ -29,7 +29,7 @@
 #define TFT_DC 21
 
 // Button pins
-#define BUTTON_A_PIN 15  // Blue button (Acknowledge)
+#define BUTTON_A_PIN 16  // Blue button (Acknowledge)
 #define BUTTON_B_PIN 4   // Red button (Busy)
 
 // ===== SIMPLIFIED TIMING SETTINGS =====
@@ -59,6 +59,8 @@
 
 // Legacy compatibility
 #define MQTT_LEGACY_STATUS "faculty/" TOSTRING(FACULTY_ID) "/status"
+
+
 
 // ===== DISPLAY LAYOUT (SIMPLIFIED) =====
 #define SCREEN_WIDTH 320
@@ -105,6 +107,7 @@
 #define ENABLE_SERIAL_DEBUG true
 #define SERIAL_BAUD_RATE 115200
 #define MAX_MESSAGE_LENGTH 512
+#define MQTT_MAX_PACKET_SIZE 768 
 #define HEARTBEAT_INTERVAL 300000  // 5 minutes
 #define TIME_ZONE_OFFSET 8         // GMT+8 Philippines
 

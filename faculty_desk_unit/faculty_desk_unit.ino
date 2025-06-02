@@ -1490,9 +1490,15 @@ void checkPeriodicTimeSync() {
 // MQTT FUNCTIONS (UNCHANGED)
 // ================================
 void setupMQTT() {
+  // ✅ ADD THIS LINE: Set buffer size BEFORE setting server
+  mqttClient.setBufferSize(MQTT_MAX_PACKET_SIZE);
+  
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setCallback(onMqttMessage);
   mqttClient.setKeepAlive(MQTT_KEEPALIVE);
+  
+  // ✅ ADD DEBUG: Verify buffer size was set
+  DEBUG_PRINTF("📦 MQTT Buffer Size set to: %d bytes\n", MQTT_MAX_PACKET_SIZE);
 }
 
 void connectMQTT() {

@@ -22,6 +22,9 @@ class Faculty(Base):
     image_path = Column(String, nullable=True)  # Path to faculty image
     status = Column(Boolean, default=False)  # False = Unavailable, True = Available
     always_available = Column(Boolean, default=False)  # If True, faculty is always shown as available
+    # NOTE: The room column is referenced in several places but has been removed from the model.
+    # The code uses getattr(faculty, 'room', None) to safely handle this attribute's absence.
+    # room = Column(String, nullable=True)  # Room where faculty is located
     last_seen = Column(DateTime, default=func.now())
     ntp_sync_status = Column(String, default='PENDING')  # NTP sync status from desk unit
     grace_period_active = Column(Boolean, default=False)  # Whether grace period is active
@@ -44,6 +47,7 @@ class Faculty(Base):
             "image_path": self.image_path,
             "status": self.status,
             "always_available": self.always_available,
+            "room": getattr(self, 'room', None),
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "ntp_sync_status": self.ntp_sync_status,
             "grace_period_active": self.grace_period_active,

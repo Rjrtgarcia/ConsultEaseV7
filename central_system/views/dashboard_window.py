@@ -811,8 +811,8 @@ class DashboardWindow(BaseWindow):
                         'id': faculty_id,
                         'name': faculty_name,
                         'department': faculty_department,
-                        'available': faculty_status or faculty_always_available,  # Show if available OR always available
-                        'status': 'Available' if (faculty_status or faculty_always_available) else 'Unavailable',
+                        'available': faculty_status,
+                        'status': 'Available' if faculty_status else 'Unavailable',
                         'email': faculty_email,
                         'room': faculty_room
                     }
@@ -1080,7 +1080,7 @@ class DashboardWindow(BaseWindow):
                     'available': faculty.status,
                     'status': 'Available' if faculty.status else 'Unavailable',
                     'email': faculty.email,
-                    'room': faculty.room
+                    'room': getattr(faculty, 'room', None)
                 }
                 safe_faculties.append(faculty_data)
             
@@ -1122,7 +1122,7 @@ class DashboardWindow(BaseWindow):
                     'available': faculty.status,
                     'status': 'Available' if faculty.status else 'Unavailable',
                     'email': faculty.email,
-                    'room': faculty.room
+                    'room': getattr(faculty, 'room', None)
                 }
                 safe_faculties.append(faculty_data)
 
@@ -1537,7 +1537,7 @@ class DashboardWindow(BaseWindow):
                     'available': faculty.status,
                     'status': 'Available' if faculty.status else 'Unavailable',
                     'email': faculty.email,
-                    'room': faculty.room
+                    'room': getattr(faculty, 'room', None)
                 }
                 safe_faculties.append(faculty_data)
 
