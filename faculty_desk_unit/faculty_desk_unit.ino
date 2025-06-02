@@ -784,32 +784,32 @@ void displayIncomingMessage(String message) {
   // Clear main area
   tft.fillRect(0, MAIN_AREA_Y, SCREEN_WIDTH, MAIN_AREA_HEIGHT, COLOR_PANEL);
 
-  // Enhanced message header with consultation ID
-  drawSimpleCard(10, MAIN_AREA_Y + 5, SCREEN_WIDTH - 20, 30, COLOR_ACCENT);
+  // Enhanced message header with consultation ID - MADE SMALLER (20px instead of 30px)
+  drawSimpleCard(10, MAIN_AREA_Y + 5, SCREEN_WIDTH - 20, 20, COLOR_ACCENT);
 
-  int headerX = getCenterX("CONSULTATION REQUEST", 2);
-  tft.setCursor(headerX, MAIN_AREA_Y + 12);
+  int headerX = getCenterX("CONSULTATION REQUEST", 1); // Reduced text size from 2 to 1
+  tft.setCursor(headerX, MAIN_AREA_Y + 10); // Adjusted Y position for smaller banner
   tft.setTextColor(COLOR_BACKGROUND);
-  tft.setTextSize(2);
+  tft.setTextSize(1); // Reduced from size 2 to 1 to fit in smaller banner
   tft.print("CONSULTATION REQUEST");
 
-  // Display consultation ID if available
+  // Display consultation ID if available - moved up since banner is smaller
   if (!g_receivedConsultationId.isEmpty()) {
-    tft.setCursor(15, MAIN_AREA_Y + 25);
+    tft.setCursor(15, MAIN_AREA_Y + 18); // Moved up from 25 to 18
     tft.setTextColor(COLOR_BACKGROUND);
     tft.setTextSize(1);
     tft.print("ID: " + g_receivedConsultationId);
   }
 
-  // Message content area with better formatting
-  tft.setCursor(15, MAIN_AREA_Y + 45);
+  // Message content area with better formatting - starts earlier due to smaller banner
+  tft.setCursor(15, MAIN_AREA_Y + 32); // Moved up from 45 to 32 (saved 13px from smaller banner)
   tft.setTextColor(COLOR_TEXT);
-  tft.setTextSize(1);
+  tft.setTextSize(2); // INCREASED from size 1 to 2 for larger, more readable text
 
-  int lineHeight = 10;
-  int maxCharsPerLine = 38;
-  int currentY = MAIN_AREA_Y + 45;
-  int maxLines = 4; // Limit to 4 lines to leave space for buttons
+  int lineHeight = 18; // INCREASED from 10 to 18 for larger text spacing
+  int maxCharsPerLine = 25; // REDUCED from 38 to 25 due to larger font size
+  int currentY = MAIN_AREA_Y + 32; // Moved up from 45 to 32
+  int maxLines = 8; // INCREASED from 6 to 8 lines - using space freed from removing on-screen buttons
 
   // Parse and display student info if available
   int fromIndex = message.indexOf("From:");
@@ -821,13 +821,14 @@ void displayIncomingMessage(String message) {
     String studentName = message.substring(fromIndex + 5, sidIndex);
     studentName.trim();
     
-    // Display student info
+    // Display student info with LARGER font
     tft.setCursor(15, currentY);
     tft.setTextColor(COLOR_ACCENT);
+    tft.setTextSize(2); // INCREASED from size 1 to 2
     tft.print("Student: ");
-    tft.setTextColor(COLOR_TEXT);
+    tft.setTextColor(COLOR_BLACK); // Changed from COLOR_TEXT to COLOR_BLACK for better readability
     tft.print(studentName);
-    currentY += lineHeight + 2;
+    currentY += lineHeight + 4; // INCREASED spacing
     
     // Extract and display the actual consultation message
     String consultationMsg = message.substring(messageIndex + 3);
@@ -835,66 +836,46 @@ void displayIncomingMessage(String message) {
     
     tft.setCursor(15, currentY);
     tft.setTextColor(COLOR_ACCENT);
+    tft.setTextSize(2); // INCREASED from size 1 to 2
     tft.print("Request:");
     currentY += lineHeight;
     
-    // Display consultation message with word wrapping
+    // Display consultation message with word wrapping - LARGER FONT AND MORE LINES
     int linesUsed = 0;
     for (int i = 0; i < consultationMsg.length() && linesUsed < maxLines - 2; i += maxCharsPerLine) {
       String line = consultationMsg.substring(i, min(i + maxCharsPerLine, (int)consultationMsg.length()));
       tft.setCursor(15, currentY);
-      tft.setTextColor(COLOR_TEXT);
+      tft.setTextColor(COLOR_BLACK); // Changed from COLOR_TEXT to COLOR_BLACK for better readability
+      tft.setTextSize(2); // INCREASED from size 1 to 2 for much larger, easier to read text
       tft.print(line);
       currentY += lineHeight;
       linesUsed++;
     }
   } else {
-    // Fallback: display raw message with word wrapping
+    // Fallback: display raw message with word wrapping - LARGER FONT AND MORE LINES
     int linesUsed = 0;
     for (int i = 0; i < message.length() && linesUsed < maxLines; i += maxCharsPerLine) {
       String line = message.substring(i, min(i + maxCharsPerLine, (int)message.length()));
       tft.setCursor(15, currentY);
+      tft.setTextColor(COLOR_BLACK); // Changed from COLOR_TEXT to COLOR_BLACK for better readability
+      tft.setTextSize(2); // INCREASED from size 1 to 2 for much larger, easier to read text
       tft.print(line);
       currentY += lineHeight;
       linesUsed++;
     }
   }
 
-  // Enhanced button instructions with clearer prompts
-  drawSimpleCard(10, MAIN_AREA_Y + 100, 145, 40, COLOR_BLUE);
-  drawSimpleCard(165, MAIN_AREA_Y + 100, 145, 40, COLOR_ERROR);
+  // REMOVED ON-SCREEN BUTTONS - Physical buttons only!
+  // Physical button instructions at bottom of display - NO VISUAL BUTTONS
+  tft.setCursor(15, MAIN_AREA_Y + 120); // Position near bottom of main area
+  tft.setTextColor(COLOR_ACCENT);
+  tft.setTextSize(1);
+  tft.print("Use PHYSICAL buttons: BLUE=Accept | RED=Busy");
 
-  // Blue button (Accept/Acknowledge) - Enhanced styling
-  tft.setCursor(20, MAIN_AREA_Y + 107);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setTextSize(1);
-  tft.print("BLUE BUTTON");
-  tft.setCursor(25, MAIN_AREA_Y + 118);
-  tft.setTextSize(2);
-  tft.print("ACCEPT");
-  tft.setCursor(20, MAIN_AREA_Y + 132);
-  tft.setTextSize(1);
-  tft.print("(Acknowledge)");
+  // REMOVED timeout indicator - messages persist until button press
+  // No more "Auto-clear in 30s" message
 
-  // Red button (Busy/Decline) - Enhanced styling
-  tft.setCursor(175, MAIN_AREA_Y + 107);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setTextSize(1);
-  tft.print("RED BUTTON");
-  tft.setCursor(185, MAIN_AREA_Y + 118);
-  tft.setTextSize(2);
-  tft.print("BUSY");
-  tft.setCursor(175, MAIN_AREA_Y + 132);
-  tft.setTextSize(1);
-  tft.print("(Unavailable)");
-
-  // Add timeout indicator
-  tft.setCursor(15, STATUS_PANEL_Y + 5);
-  tft.setTextColor(COLOR_WARNING);
-  tft.setTextSize(1);
-  tft.print("Auto-clear in 30s");
-
-  DEBUG_PRINTF("📱 Enhanced consultation request displayed. ID: %s\n", g_receivedConsultationId.c_str());
+  DEBUG_PRINTF("📱 Enhanced consultation request displayed (NO AUTO-EXPIRY). ID: %s\n", g_receivedConsultationId.c_str());
 }
 
 // ================================
@@ -1022,6 +1003,7 @@ void showResponseConfirmation(String confirmText, uint16_t color) {
 }
 
 void clearCurrentMessage() {
+  DEBUG_PRINTLN("📱 Consultation message manually dismissed via physical button");
   currentMessage = "";
   messageDisplayed = false;
   messageDisplayStart = 0;
@@ -1585,9 +1567,9 @@ void setup() {
     while (!Serial && millis() < 3000);
   }
 
-  DEBUG_PRINTLN("=== NU FACULTY DESK UNIT - GRACE PERIOD BLE ===");
-  DEBUG_PRINTLN("=== May 29, 2025 - 23:27 (Philippines) ===");
-  DEBUG_PRINTLN("=== WITH 1-MINUTE GRACE PERIOD SYSTEM ===");
+  DEBUG_PRINTLN("=== NU FACULTY DESK UNIT - ENHANCED CONSULTATION SYSTEM ===");
+  DEBUG_PRINTLN("=== PERSISTENT MESSAGES + PHYSICAL BUTTON CONTROL ===");
+  DEBUG_PRINTLN("=== May 29, 2025 - Updated for Better UX ===");
 
   if (!validateConfiguration()) {
     while(true) delay(5000);
@@ -1615,9 +1597,11 @@ void setup() {
   setupBLE();
   adaptiveScanner.init(&presenceDetector);  // Pass reference to presence detector
 
-  DEBUG_PRINTLN("=== GRACE PERIOD BLE SYSTEM READY ===");
+  DEBUG_PRINTLN("=== ENHANCED CONSULTATION SYSTEM READY ===");
   DEBUG_PRINTLN("✅ BLE disconnections now have 1-minute grace period!");
-  DEBUG_PRINTLN("✅ Simple offline message queuing enabled!");
+  DEBUG_PRINTLN("✅ Consultation messages persist until physical button press!");
+  DEBUG_PRINTLN("✅ Larger, more readable consultation message display!");
+  DEBUG_PRINTLN("✅ Physical button-only control (no on-screen buttons)!");
   drawCompleteUI();
 }
 
@@ -1649,12 +1633,6 @@ void loop() {
 
   // Update offline queue system
   updateOfflineQueue();
-
-  // Handle consultation request timeout
-  if (messageDisplayed && (millis() - messageDisplayStart > MESSAGE_DISPLAY_TIMEOUT)) {
-    DEBUG_PRINTLN("⏰ Consultation request timed out - auto-clearing");
-    clearCurrentMessage();
-  }
 
   // ADAPTIVE BLE SCANNING WITH GRACE PERIOD (Replaces old performBLEScan)
   adaptiveScanner.update();
