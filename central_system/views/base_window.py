@@ -57,41 +57,8 @@ class BaseWindow(QMainWindow):
         self.setMinimumSize(800, 480)  # Minimum size for Raspberry Pi 7" touchscreen
         self.apply_touch_friendly_style()
 
-        # Add keyboard toggle button to the status bar
+        # Add status bar
         self.statusBar().setStyleSheet("QStatusBar { border-top: 1px solid #cccccc; }")
-
-        # Create keyboard toggle button with icon if available
-        self.keyboard_toggle_button = QPushButton("⌨ Keyboard")
-        self.keyboard_toggle_button.setFixedSize(140, 40)
-        self.keyboard_toggle_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f4d35e;  /* Gold accent color for visibility */
-                color: #0d3b66;  /* Dark blue text for contrast */
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-weight: bold;
-                font-size: 12pt;
-                border: 2px solid #0d3b66;  /* Border for better visibility */
-            }
-            QPushButton:hover {
-                background-color: #f7e07e;  /* Lighter gold on hover */
-            }
-            QPushButton:pressed {
-                background-color: #e6c54a;  /* Darker gold when pressed */
-            }
-        """)
-
-        # Try to set an icon if available
-        try:
-            keyboard_icon = IconProvider.get_icon("keyboard")
-            if keyboard_icon and not keyboard_icon.isNull():
-                self.keyboard_toggle_button.setIcon(keyboard_icon)
-        except:
-            # If icon not available, just use text
-            pass
-
-        self.keyboard_toggle_button.clicked.connect(self._toggle_keyboard)
-        self.statusBar().addPermanentWidget(self.keyboard_toggle_button)
 
         # Center window on screen
         self.center()

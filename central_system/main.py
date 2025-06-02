@@ -709,15 +709,10 @@ class ConsultEaseApp:
 
         # Define a callback for after the transition completes
         def after_transition():
-            # Force the keyboard to show
-            if self.keyboard_handler:
-                logger.info("Showing keyboard using improved keyboard handler")
-                self.keyboard_handler.show_keyboard()
-
-                # Focus the username input to trigger the keyboard
-                QTimer.singleShot(300, lambda: self.admin_login_window.username_input.setFocus())
-                # Focus again after a longer delay to ensure keyboard appears
-                QTimer.singleShot(800, lambda: self.admin_login_window.username_input.setFocus())
+            # Focus the username input to trigger the keyboard
+            QTimer.singleShot(300, lambda: self.admin_login_window.username_input.setFocus())
+            # Focus again after a longer delay to ensure proper focus
+            QTimer.singleShot(800, lambda: self.admin_login_window.username_input.setFocus())
 
         # Apply transition if there's a visible window to transition from
         if current_window:
