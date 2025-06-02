@@ -518,6 +518,77 @@ class RFIDService(QObject):
             self.device_status_changed.emit("disconnected", "RFID device not detected")
             return False
 
+    def refresh_student_data(self):
+        """
+        Refresh student data from the database.
+        This ensures newly added students are immediately available for RFID scanning.
+        
+        Returns:
+            list: List of all students in the database
+        """
+        try:
+            from ..models.base import get_db
+            from ..models.student import Student
+            
+            db = get_db()
+            students = db.query(Student).all()
+            
+            # Access student data while session is active to avoid DetachedInstanceError
+            student_data = []
+            for student in students:
+                student_info = {
+                    'id': student.id,
+                    'name': student.name,
+                    'rfid_uid': student.rfid_uid,
+                    'department': student.department,
+                    'email': student.email
+                }
+                student_data.append(student_info)
+            
+            db.close()
+            
+            logger.info(f"Refreshed student data from database: {len(student_data)} students available for RFID scanning")
+            
+            # Log some details for debugging
+            for student in student_data[:5]:  # Log first 5 students
+                logger.debug(f"Student available: {student['name']} (RFID: {student['rfid_uid']})")
+            
+            if len(student_data) > 5:
+                logger.debug(f"... and {len(student_data) - 5} more students")
+            
+            return student_data
+            
+        except Exception as e:
+            logger.error(f"Error refreshing student data: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return []
+
+    def simulate_card_read(self, rfid_uid):
+        """
+        Simulate an RFID card read for testing purposes.
+        This method emits the card_read_signal as if a real card was scanned.
+        
+        Args:
+            rfid_uid (str): The RFID UID to simulate
+        """
+        try:
+            if not rfid_uid:
+                logger.warning("Cannot simulate RFID read with empty UID")
+                return
+                
+            logger.info(f"Simulating RFID card read: {rfid_uid}")
+            
+            # Emit the card read signal to trigger normal RFID processing
+            self.card_read_signal.emit(rfid_uid)
+            
+            logger.info(f"Successfully simulated RFID card read: {rfid_uid}")
+            
+        except Exception as e:
+            logger.error(f"Error simulating RFID card read: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
     def get_device_status(self):
         """
         Get current RFID device status.

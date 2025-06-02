@@ -1928,10 +1928,17 @@ class StudentManagementTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.student_controller = None
+        self.rfid_service = None  # Store RFID service instance
         self.init_ui()
+        self.refresh_data()
 
         # Initialize RFID service
-        self.rfid_service = get_rfid_service()
+        try:
+            from ..services import get_rfid_service
+            self.rfid_service = get_rfid_service()
+        except Exception as e:
+            logger.warning(f"Failed to initialize RFID service: {e}")
 
         # For scanning RFID cards
         self.scanning_for_rfid = False
@@ -1947,6 +1954,141 @@ class StudentManagementTab(QWidget):
         except Exception as e:
             # Can't use logger here as it might be None during shutdown
             print(f"Error in StudentManagementTab destructor: {str(e)}")
+
+    def _safely_refresh_rfid_service(self, operation_name="operation"):
+        """
+        Safely refresh the RFID service with comprehensive error handling.
+        
+        Args:
+            operation_name (str): Name of the operation for logging
+            
+        Returns:
+            bool: True if refresh was successful, False otherwise
+        """
+        try:
+            # Method 1: Try to get fresh instance and reload module
+            import importlib
+            from ..services import rfid_service as rfid_module
+            
+            # Force reload the module to get latest code
+            importlib.reload(rfid_module)
+            
+            # Get fresh service instance
+            rfid_service_instance = rfid_module.get_rfid_service()
+            
+            # Check if the method exists
+            if hasattr(rfid_service_instance, 'refresh_student_data'):
+                rfid_service_instance.refresh_student_data()
+                logger.info(f"✅ Successfully refreshed RFID service after {operation_name}")
+                return True
+            else:
+                logger.warning(f"⚠️ refresh_student_data method not found on RFIDService")
+                raise AttributeError("refresh_student_data method not found")
+                
+        except Exception as e:
+            logger.warning(f"Method 1 failed: {str(e)}")
+            
+            try:
+                # Method 2: Try using RFIDController as fallback
+                from ..controllers.rfid_controller import RFIDController
+                rfid_controller = RFIDController()
+                
+                if hasattr(rfid_controller, 'refresh_student_data'):
+                    student_data = rfid_controller.refresh_student_data()
+                    logger.info(f"✅ Used RFIDController.refresh_student_data() as fallback for {operation_name}")
+                    logger.info(f"   Loaded {len(student_data)} students for RFID scanning")
+                    return True
+                else:
+                    logger.warning("RFIDController.refresh_student_data() also not found")
+                    
+            except Exception as e2:
+                logger.error(f"Method 2 failed: {str(e2)}")
+                
+                try:
+                    # Method 3: Try direct import and instantiation
+                    from central_system.services.rfid_service import RFIDService, get_rfid_service
+                    
+                    # Check if class has the method
+                    if hasattr(RFIDService, 'refresh_student_data'):
+                        rfid_instance = get_rfid_service()
+                        rfid_instance.refresh_student_data()
+                        logger.info(f"✅ Used direct RFIDService instance for {operation_name}")
+                        return True
+                    else:
+                        logger.error("refresh_student_data method not found even in direct RFIDService class")
+                        
+                except Exception as e3:
+                    logger.error(f"Method 3 failed: {str(e3)}")
+                    
+        # All methods failed
+        logger.error(f"❌ All RFID refresh methods failed for {operation_name}")
+        logger.error("💡 RFID service may need to be restarted manually")
+        return False
+
+    def debug_rfid_service(self):
+        """
+        Debug method to diagnose RFID service issues.
+        Can be called manually to check service status.
+        """
+        logger.info("🔍 Starting RFID service debug...")
+        
+        try:
+            # Test 1: Check file existence
+            import os
+            rfid_file = os.path.join(os.getcwd(), 'central_system', 'services', 'rfid_service.py')
+            if os.path.exists(rfid_file):
+                logger.info(f"✅ RFID service file exists: {rfid_file}")
+                
+                # Check file modification time
+                import time
+                mtime = os.path.getmtime(rfid_file)
+                logger.info(f"   Last modified: {time.ctime(mtime)}")
+            else:
+                logger.error(f"❌ RFID service file not found: {rfid_file}")
+                
+            # Test 2: Check imports
+            try:
+                from central_system.services.rfid_service import RFIDService, get_rfid_service
+                logger.info("✅ Direct import successful")
+                
+                # Test 3: Check class methods
+                methods = [method for method in dir(RFIDService) if not method.startswith('_')]
+                logger.info(f"   Available RFIDService methods: {methods}")
+                
+                if 'refresh_student_data' in methods:
+                    logger.info("✅ refresh_student_data found in class definition")
+                else:
+                    logger.error("❌ refresh_student_data NOT found in class definition")
+                    
+            except Exception as e:
+                logger.error(f"❌ Import failed: {e}")
+                
+            # Test 4: Check instance
+            try:
+                service = get_rfid_service()
+                logger.info(f"✅ Service instance created: {type(service)}")
+                
+                instance_methods = [method for method in dir(service) if not method.startswith('_')]
+                logger.info(f"   Instance methods: {instance_methods}")
+                
+                if hasattr(service, 'refresh_student_data'):
+                    logger.info("✅ refresh_student_data found on instance")
+                    
+                    # Try to call it
+                    result = service.refresh_student_data()
+                    logger.info(f"✅ Method call successful, returned {len(result)} students")
+                else:
+                    logger.error("❌ refresh_student_data NOT found on instance")
+                    
+            except Exception as e:
+                logger.error(f"❌ Instance test failed: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+        except Exception as e:
+            logger.error(f"❌ Debug failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     def init_ui(self):
         """
@@ -2160,9 +2302,7 @@ class StudentManagementTab(QWidget):
             logger.info(f"Added student to database: {name} with RFID: {rfid_uid}")
 
             # Get the RFID service and refresh it
-            rfid_service = get_rfid_service()
-            rfid_service.refresh_student_data()
-            logger.info(f"Refreshed RFID service after adding student: {name}")
+            self._safely_refresh_rfid_service(f"adding student {name}")
 
             # Show success message
             QMessageBox.information(self, "Add Student", f"Student '{name}' added successfully.")
@@ -2284,9 +2424,7 @@ class StudentManagementTab(QWidget):
             logger.info(f"Updated student in database: ID={student_id}, Name={name}, RFID={rfid_uid}")
 
             # Get the RFID service and refresh it
-            rfid_service = get_rfid_service()
-            rfid_service.refresh_student_data()
-            logger.info(f"Refreshed RFID service after updating student: {name}")
+            self._safely_refresh_rfid_service(f"updating student {name}")
 
             # Show success message
             QMessageBox.information(self, "Edit Student", f"Student '{name}' updated successfully.")
@@ -2380,9 +2518,7 @@ class StudentManagementTab(QWidget):
             logger.info(f"Deleted student from database: ID={student_id}, Name={student_name}")
 
             # Get the RFID service and refresh it
-            rfid_service = get_rfid_service()
-            rfid_service.refresh_student_data()
-            logger.info(f"Refreshed RFID service after deleting student: {student_name}")
+            self._safely_refresh_rfid_service(f"deleting student {student_name}")
 
             # Show success message
             QMessageBox.information(self, "Delete Student", f"Student '{student_name}' deleted successfully.")
