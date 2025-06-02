@@ -13,6 +13,7 @@ import sys
 import time
 import json
 import logging
+import socket
 import paho.mqtt.client as mqtt
 
 # Configure logging
@@ -22,8 +23,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# MQTT Configuration
-BROKER = "192.168.1.100"
+# MQTT Configuration - Try multiple possible broker addresses
+POSSIBLE_BROKERS = [
+    "192.168.1.100",    # ESP32 configured address
+    "localhost",        # Default central system
+    "127.0.0.1",        # Localhost IP
+    "172.20.10.8",      # Alternative from templates
+]
 PORT = 1883
 FACULTY_ID = 1
 
@@ -31,24 +37,61 @@ FACULTY_ID = 1
 RESPONSES_TOPIC = f"consultease/faculty/{FACULTY_ID}/responses"
 MESSAGES_TOPIC = f"consultease/faculty/{FACULTY_ID}/messages"
 
+def test_broker_connectivity(host, port, timeout=3):
+    """Test if a broker is accessible."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception as e:
+        logger.debug(f"Connection test failed for {host}:{port} - {e}")
+        return False
+
+def find_mqtt_broker():
+    """Find an accessible MQTT broker from the list."""
+    logger.info("🔍 Searching for accessible MQTT brokers...")
+    
+    for broker in POSSIBLE_BROKERS:
+        logger.info(f"   Testing {broker}:{PORT}...")
+        if test_broker_connectivity(broker, PORT):
+            logger.info(f"✅ Found accessible broker: {broker}:{PORT}")
+            return broker
+        else:
+            logger.info(f"❌ Cannot reach {broker}:{PORT}")
+    
+    logger.error("❌ No accessible MQTT brokers found!")
+    logger.info("💡 Tips:")
+    logger.info("   1. Make sure MQTT broker is running")
+    logger.info("   2. Check firewall settings")
+    logger.info("   3. Verify the broker IP address")
+    logger.info("   4. Try running: mosquitto_pub -h <broker_ip> -t test -m 'hello'")
+    return None
+
 class ESP32CommunicationTester:
     """Test ESP32 communication with central system."""
     
-    def __init__(self):
+    def __init__(self, broker_host):
+        self.broker_host = broker_host
         self.client = mqtt.Client("ESP32_Communication_Tester")
         self.client.on_connect = self.on_connect
         self.client.on_publish = self.on_publish
         self.client.on_message = self.on_message
+        self.connected = False
         
     def on_connect(self, client, userdata, flags, rc):
         """Callback for MQTT connection."""
         if rc == 0:
-            logger.info(f"✅ Connected to MQTT broker at {BROKER}:{PORT}")
+            self.connected = True
+            logger.info(f"✅ Connected to MQTT broker at {self.broker_host}:{PORT}")
             
             # Subscribe to see if we get anything back
             client.subscribe("consultease/system/notifications")
-            logger.info("📬 Subscribed to system notifications")
+            client.subscribe("consultease/#")  # Subscribe to all ConsultEase topics
+            logger.info("📬 Subscribed to system notifications and all topics")
         else:
+            self.connected = False
             logger.error(f"❌ Failed to connect to MQTT broker, return code: {rc}")
     
     def on_publish(self, client, userdata, mid):
@@ -62,10 +105,23 @@ class ESP32CommunicationTester:
     def connect(self):
         """Connect to MQTT broker."""
         try:
-            self.client.connect(BROKER, PORT, 60)
+            logger.info(f"🔌 Connecting to MQTT broker at {self.broker_host}:{PORT}...")
+            self.client.connect(self.broker_host, PORT, 60)
             self.client.loop_start()
-            time.sleep(2)  # Wait for connection
-            return True
+            
+            # Wait for connection with timeout
+            timeout = 10
+            start_time = time.time()
+            while not self.connected and (time.time() - start_time) < timeout:
+                time.sleep(0.1)
+            
+            if self.connected:
+                logger.info("✅ MQTT connection established successfully")
+                return True
+            else:
+                logger.error("❌ MQTT connection timeout")
+                return False
+                
         except Exception as e:
             logger.error(f"❌ Failed to connect: {e}")
             return False
@@ -178,12 +234,32 @@ class ESP32CommunicationTester:
 
 def main():
     """Main function."""
-    tester = ESP32CommunicationTester()
+    logger.info("🔍 ESP32 Communication Test - Broker Discovery & Testing")
+    logger.info("=" * 70)
+    
+    # Find accessible broker
+    broker_host = find_mqtt_broker()
+    if not broker_host:
+        logger.error("❌ Cannot proceed without an accessible MQTT broker")
+        logger.info("📋 To set up a local MQTT broker:")
+        logger.info("   sudo apt-get install mosquitto mosquitto-clients")
+        logger.info("   sudo systemctl start mosquitto")
+        logger.info("   sudo systemctl enable mosquitto")
+        return False
+    
+    # Run the test
+    tester = ESP32CommunicationTester(broker_host)
     
     try:
         success = tester.run_test()
         if success:
             logger.info("🎉 Test completed successfully")
+            logger.info("🔍 If ESP32 is connected, it should:")
+            logger.info("   1. Display the test consultation message")
+            logger.info("   2. Allow button responses")
+            logger.info("🔍 If central system is running, it should:")
+            logger.info("   1. Log faculty response handling")
+            logger.info("   2. Update consultation status in database")
         else:
             logger.error("❌ Test failed")
     except KeyboardInterrupt:
