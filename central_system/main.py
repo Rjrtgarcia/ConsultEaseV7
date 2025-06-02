@@ -86,9 +86,9 @@ class ConsultEaseApp:
         from .utils.hardware_validator import log_hardware_status
         hardware_status = log_hardware_status()
 
-        # Initialize database with comprehensive admin account validation
-        logger.info("Initializing database and ensuring admin account integrity...")
-        init_db()
+        # Initialize database without auto-creating admin accounts to allow first-time setup detection
+        logger.info("Initializing database tables and structure...")
+        init_db(auto_create_admin=False)
 
         # Start system monitoring
         logger.info("Starting system monitoring...")
@@ -128,6 +128,11 @@ class ConsultEaseApp:
                                                          # so ensure_default_admin will likely not create an account here,
                                                          # unless the specific 'admin' user is missing.
             self._verify_admin_account_startup()     # Verifies/repairs the 'admin' account.
+            
+            # Ensure admin account integrity since we skipped it during init_db()
+            logger.info("Ensuring admin account integrity for non-first-time setup...")
+            from .models.base import _ensure_admin_account_integrity
+            _ensure_admin_account_integrity()
 
         # Initialize windows
         self.login_window = None

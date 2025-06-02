@@ -556,12 +556,13 @@ def _test_admin_login(admin, password):
         logger.error(f"❌ Admin login test failed with error: {e}")
         return False
 
-def init_db(force_recreate=False):
+def init_db(force_recreate=False, auto_create_admin=True):
     """
     Initialize the database with all tables and indexes.
     
     Args:
         force_recreate (bool): If True, drop and recreate all tables
+        auto_create_admin (bool): If True, automatically ensure admin account exists
     """
     try:
         logger.info("Initializing database...")
@@ -580,8 +581,12 @@ def init_db(force_recreate=False):
         # Create performance indexes
         _create_performance_indexes()
         
-        # Ensure admin account integrity
-        _ensure_admin_account_integrity()
+        # Ensure admin account integrity only if requested
+        if auto_create_admin:
+            _ensure_admin_account_integrity()
+            logger.info("Admin account integrity ensured")
+        else:
+            logger.info("Skipping automatic admin account creation (will be handled by application)")
         
         logger.info("Database initialization completed successfully")
         

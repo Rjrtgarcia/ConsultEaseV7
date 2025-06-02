@@ -20,6 +20,7 @@ class AdminLoginWindow(BaseWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.admin_controller = None  # Will be set by main application
+        self.first_time_setup_shown = False  # Flag to prevent multiple setup dialogs
         self.init_ui()
 
     def set_admin_controller(self, admin_controller):
@@ -242,13 +243,22 @@ class AdminLoginWindow(BaseWindow):
         """
         super().showEvent(event)
 
+        # Only check for first-time setup once to prevent multiple dialogs
+        if self.first_time_setup_shown:
+            logger.info("First-time setup already shown, skipping check")
+            return
+
         # Check for first-time setup
         try:
-            if self.admin_controller.is_first_time_setup():
+            if self.admin_controller and self.admin_controller.is_first_time_setup():
                 logger.info("First-time setup detected, showing setup dialog")
+                self.first_time_setup_shown = True  # Set flag to prevent multiple dialogs
                 self.show_first_time_setup()
             else:
-                logger.info("Existing admin accounts found, showing normal login")
+                if self.admin_controller:
+                    logger.info("Existing admin accounts found, showing normal login")
+                else:
+                    logger.warning("AdminController not set, cannot check first-time setup")
         except Exception as e:
             logger.error(f"Error checking first-time setup: {str(e)}")
             # If there's an error, assume normal login
