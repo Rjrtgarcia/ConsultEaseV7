@@ -218,18 +218,19 @@ class DashboardWindow(BaseWindow):
     request_ui_refresh = pyqtSignal()
 
     def __init__(self, student=None, parent=None):
-        # Call parent __init__ FIRST before any other operations
-        super().__init__(parent)
-        
+        # Set all instance variables FIRST before calling super().__init__()
+        # because BaseWindow.__init__() will call self.init_ui() which needs these variables
         self.student = student
         self.faculty_list = []
         self.consultation_panel = None
         
+        # Call parent __init__ which will automatically call self.init_ui()
+        super().__init__(parent)
+        
+        # Set up additional initialization after UI is created
         # Set up real-time consultation status updates after parent initialization
         self.setup_real_time_updates()
-        
-        self.init_ui()
-        
+
         # Set up smart refresh manager for optimized faculty status updates
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(False)
