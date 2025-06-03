@@ -1598,9 +1598,11 @@ class DashboardWindow(BaseWindow):
             
             # Subscribe to faculty status updates using the centralized utils
             topics = [
-                "faculty/+/status",
-                "faculty/+/availability", 
-                "consultation/+/status"
+                "consultease/faculty/+/status",  # ✅ PRIMARY: What desk units actually publish to
+                "faculty/+/status",              # Legacy compatibility
+                "faculty/+/availability",        # Alternative availability topic
+                "consultation/+/status",         # Consultation status updates
+                "consultease/system/notifications",  # System-wide notifications
             ]
             
             for topic in topics:
@@ -1625,9 +1627,11 @@ class DashboardWindow(BaseWindow):
             if mqtt_service:
                 # Unsubscribe from topics
                 topics = [
+                    "consultease/faculty/+/status",
                     "faculty/+/status",
                     "faculty/+/availability", 
-                    "consultation/+/status"
+                    "consultation/+/status",
+                    "consultease/system/notifications",
                 ]
                 
                 for topic in topics:
@@ -1653,29 +1657,60 @@ class DashboardWindow(BaseWindow):
         Process real-time status updates in the main thread.
         """
         try:
-            logger.debug(f"Received real-time update: {topic} -> {data}")
+            logger.info(f"🔥 DASHBOARD - Received real-time update: {topic} -> {data}")
             
             # Parse topic to understand what changed
             topic_parts = topic.split('/')
-            if len(topic_parts) >= 3:
+            
+            if "consultease/faculty" in topic and "status" in topic:
+                # Parse consultease/faculty/{id}/status format
+                try:
+                    faculty_id = int(topic_parts[2])  # consultease/faculty/{ID}/status
+                    
+                    if isinstance(data, dict):
+                        present = data.get('present', False)
+                        status = data.get('status', 'UNKNOWN')
+                        detailed_status = data.get('detailed_status', status)
+                        
+                        logger.info(f"🔥 Faculty {faculty_id} status update: present={present}, status={status}")
+                        
+                        # Trigger faculty grid refresh to update availability
+                        logger.info("🔥 Triggering faculty grid refresh due to status change")
+                        self._debounced_refresh()
+                        
+                    else:
+                        logger.warning(f"🔥 Unexpected data format for faculty status: {type(data)}")
+                        
+                except (IndexError, ValueError) as e:
+                    logger.error(f"🔥 Error parsing faculty ID from topic {topic}: {e}")
+                    
+            elif len(topic_parts) >= 3:
                 entity_type = topic_parts[0]  # faculty or consultation
                 entity_id = topic_parts[1]
                 update_type = topic_parts[2]  # status or availability
                 
                 if entity_type == "faculty":
-                    # Faculty status changed - trigger a minimal refresh
-                    logger.info(f"Faculty {entity_id} {update_type} changed")
-                    # Use debounced refresh to avoid spam
+                    # Legacy faculty status changed - trigger a minimal refresh
+                    logger.info(f"🔥 Legacy faculty {entity_id} {update_type} changed")
                     self._debounced_refresh()
                     
                 elif entity_type == "consultation":
                     # Consultation status changed - update consultation panel
-                    logger.info(f"Consultation {entity_id} status changed")
+                    logger.info(f"🔥 Consultation {entity_id} status changed")
                     if hasattr(self, 'consultation_panel'):
                         self.consultation_panel.refresh_history()
                         
+            elif "consultease/system/notifications" in topic:
+                # System-wide notifications
+                if isinstance(data, dict) and data.get('type') == 'faculty_status':
+                    faculty_id = data.get('faculty_id')
+                    logger.info(f"🔥 System notification: Faculty {faculty_id} status changed")
+                    self._debounced_refresh()
+                    
         except Exception as e:
-            logger.error(f"Error handling real-time status update: {e}")
+            logger.error(f"🔥 Error handling real-time status update: {e}")
+            import traceback
+            logger.error(f"🔥 Traceback: {traceback.format_exc()}")
 
     def _debounced_refresh(self):
         """
