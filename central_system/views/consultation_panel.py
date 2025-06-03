@@ -871,6 +871,11 @@ class ConsultationHistoryPanel(QFrame):
         try:
             import paho.mqtt.client as mqtt
             
+            # Initialize MQTT connection variables FIRST, before attempting connection
+            self._mqtt_connected = False
+            self._mqtt_retry_count = 0
+            self._max_retries = 5
+            
             # Create MQTT client with improved configuration
             self.mqtt_client = mqtt.Client()
             self.mqtt_client.on_connect = self.on_mqtt_connect
@@ -888,11 +893,6 @@ class ConsultationHistoryPanel(QFrame):
                 self.mqtt_client.connect(mqtt_server, mqtt_port, 60)
                 self.mqtt_client.loop_start()
                 logger.info("MQTT monitoring started for consultation updates")
-                
-                # Set up connection monitoring
-                self._mqtt_connected = False
-                self._mqtt_retry_count = 0
-                self._max_retries = 5
                 
             except Exception as e:
                 logger.warning(f"Could not connect to MQTT broker: {e}")
