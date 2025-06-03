@@ -750,64 +750,71 @@ class ConsultationHistoryPanel(QFrame):
             # Actions
             actions_cell = QWidget()
             actions_layout = QHBoxLayout(actions_cell)
-            actions_layout.setContentsMargins(5, 5, 5, 5)  # Increased margins for better spacing
-            actions_layout.setSpacing(8)  # Add spacing between buttons
+            actions_layout.setContentsMargins(10, 8, 10, 8)  # Better margins for button centering
+            actions_layout.setSpacing(12)  # Increased spacing between buttons
 
-            # View details button with improved sizing
+            # Add stretch before buttons for better centering
+            actions_layout.addStretch()
+
+            # View details button with improved sizing and centering
             view_button = QPushButton("View")
-            view_button.setFixedSize(60, 35)  # Fixed size to ensure consistent button appearance
+            view_button.setFixedSize(70, 40)  # Slightly larger for better touch interaction
             view_button.setStyleSheet("""
                 QPushButton {
                     background-color: #3498db; 
                     color: white;
                     border: none;
-                    border-radius: 4px;
-                    font-size: 12pt;
+                    border-radius: 6px;
+                    font-size: 13pt;
                     font-weight: bold;
-                    padding: 5px 10px;
+                    padding: 8px 12px;
                 }
                 QPushButton:hover {
                     background-color: #2980b9;
+                    transform: scale(1.02);
                 }
                 QPushButton:pressed {
                     background-color: #21618c;
+                    transform: scale(0.98);
                 }
             """)
             # Use a better lambda that ignores the checked parameter
             view_button.clicked.connect(lambda _, c=consultation: self.view_consultation_details(c))
             actions_layout.addWidget(view_button)
 
-            # Cancel button (only for pending consultations) with improved sizing
+            # Cancel button (only for pending consultations) with improved sizing and centering
             if consultation.status.value == "pending":
                 cancel_button = QPushButton("Cancel")
-                cancel_button.setFixedSize(70, 35)  # Fixed size to ensure consistent button appearance
+                cancel_button.setFixedSize(80, 40)  # Slightly larger for better touch interaction
                 cancel_button.setStyleSheet("""
                     QPushButton {
                         background-color: #e74c3c; 
                         color: white;
                         border: none;
-                        border-radius: 4px;
-                        font-size: 12pt;
+                        border-radius: 6px;
+                        font-size: 13pt;
                         font-weight: bold;
-                        padding: 5px 10px;
+                        padding: 8px 12px;
                     }
                     QPushButton:hover {
                         background-color: #c0392b;
+                        transform: scale(1.02);
                     }
                     QPushButton:pressed {
                         background-color: #a93226;
+                        transform: scale(0.98);
                     }
                 """)
                 # Use a better lambda that ignores the checked parameter
                 cancel_button.clicked.connect(lambda _, c=consultation: self.cancel_consultation(c))
                 actions_layout.addWidget(cancel_button)
 
-            # Add stretch to center buttons if only one button is present
+            # Add stretch after buttons for perfect centering
             actions_layout.addStretch()
 
-            # Set size policy for proper widget sizing
+            # Set size policy for proper widget sizing with better height
             actions_cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            actions_cell.setMinimumHeight(40)  # Ensure minimum height for button visibility
+            actions_cell.setMinimumHeight(50)  # Increased minimum height for better button visibility
 
             self.consultation_table.setCellWidget(row_position, 4, actions_cell)
 
@@ -868,76 +875,96 @@ class ConsultationDetailsDialog(QDialog):
         from ..utils.theme import ConsultEaseTheme
 
         self.setWindowTitle("Consultation Details")
-        self.setMinimumWidth(650)
-        self.setMinimumHeight(550)
+        self.setMinimumWidth(700)  # Slightly wider for better content display
+        self.setMinimumHeight(600)  # Slightly taller for better spacing
         self.setObjectName("consultation_details_dialog")
 
-        # Apply theme-based stylesheet with improved readability
+        # Apply theme-based stylesheet with improved readability and better spacing
         self.setStyleSheet('''
             QDialog#consultation_details_dialog {
                 background-color: #f8f9fa;
+                padding: 15px;
             }
             QLabel {
-                font-size: 15pt;
+                font-size: 16pt;
                 color: #212529;
+                padding: 5px 0;
             }
             QLabel[heading="true"] {
-                font-size: 20pt;
+                font-size: 22pt;
                 font-weight: bold;
                 color: #228be6;
-                margin-bottom: 10px;
+                margin-bottom: 15px;
+                padding: 10px 0;
             }
             QFrame {
                 border: 1px solid #dee2e6;
-                border-radius: 8px;
+                border-radius: 10px;
                 background-color: white;
-                padding: 20px;
-                margin: 5px 0;
+                padding: 25px;
+                margin: 10px 0;
             }
             QPushButton {
-                border-radius: 5px;
-                padding: 12px 20px;
-                font-size: 15pt;
+                border-radius: 8px;
+                padding: 15px 25px;
+                font-size: 16pt;
                 font-weight: bold;
                 color: white;
                 background-color: #228be6;
+                min-width: 120px;
+                min-height: 45px;
             }
             QPushButton:hover {
                 background-color: #1971c2;
+                transform: scale(1.02);
+            }
+            QPushButton:pressed {
+                background-color: #1864ab;
+                transform: scale(0.98);
             }
         ''')
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setSpacing(20)  # Increased spacing between elements
+        layout.setContentsMargins(20, 20, 20, 20)  # Better margins
 
         # Title
         title_label = QLabel("Consultation Details")
         title_label.setProperty("heading", "true")
+        title_label.setAlignment(Qt.AlignCenter)  # Center the title
         layout.addWidget(title_label)
 
         # Details frame
         details_frame = QFrame()
         details_layout = QFormLayout(details_frame)
-        details_layout.setSpacing(10)
+        details_layout.setSpacing(15)  # Increased spacing between form rows
+        details_layout.setLabelAlignment(Qt.AlignRight)
+        details_layout.setFormAlignment(Qt.AlignLeft)
 
         # Faculty
         faculty_label = QLabel("Faculty:")
+        faculty_label.setStyleSheet("font-weight: bold; color: #495057;")
         faculty_value = QLabel(self.consultation.faculty.name)
-        faculty_value.setStyleSheet("font-weight: bold;")
+        faculty_value.setStyleSheet("font-weight: bold; font-size: 17pt; color: #228be6;")
         details_layout.addRow(faculty_label, faculty_value)
 
         # Department
         dept_label = QLabel("Department:")
+        dept_label.setStyleSheet("font-weight: bold; color: #495057;")
         dept_value = QLabel(self.consultation.faculty.department)
+        dept_value.setStyleSheet("font-size: 16pt; color: #343a40;")
         details_layout.addRow(dept_label, dept_value)
 
         # Course
         course_label = QLabel("Course:")
+        course_label.setStyleSheet("font-weight: bold; color: #495057;")
         course_value = QLabel(self.consultation.course_code if self.consultation.course_code else "N/A")
+        course_value.setStyleSheet("font-size: 16pt; color: #343a40;")
         details_layout.addRow(course_label, course_value)
 
         # Status with enhanced visual styling
         status_label = QLabel("Status:")
+        status_label.setStyleSheet("font-weight: bold; color: #495057;")
         status_value = QLabel(self.consultation.status.value.capitalize())
 
         # Define status colors with better contrast and accessibility
@@ -946,96 +973,119 @@ class ConsultationDetailsDialog(QDialog):
                 "color": "#000000",                # Black text
                 "background": "#ffd43b",           # Bright yellow background
                 "border": "2px solid #f08c00",     # Orange border
-                "padding": "8px 12px",
-                "border-radius": "6px"
+                "padding": "10px 15px",
+                "border-radius": "8px"
             },
             "accepted": {
                 "color": "#ffffff",                # White text
                 "background": "#40c057",           # Bright green background
                 "border": "2px solid #2b8a3e",     # Dark green border
-                "padding": "8px 12px",
-                "border-radius": "6px"
+                "padding": "10px 15px",
+                "border-radius": "8px"
             },
             "busy": {
                 "color": "#ffffff",                # White text
                 "background": "#ff9800",           # Orange background for busy
                 "border": "2px solid #e65100",     # Darker orange border
-                "padding": "8px 12px",
-                "border-radius": "6px"
+                "padding": "10px 15px",
+                "border-radius": "8px"
             },
             "completed": {
                 "color": "#ffffff",                # White text
                 "background": "#339af0",           # Bright blue background
                 "border": "2px solid #1864ab",     # Dark blue border
-                "padding": "8px 12px",
-                "border-radius": "6px"
+                "padding": "10px 15px",
+                "border-radius": "8px"
             },
             "cancelled": {
                 "color": "#ffffff",                # White text
                 "background": "#fa5252",           # Bright red background
                 "border": "2px solid #c92a2a",     # Dark red border
-                "padding": "8px 12px",
-                "border-radius": "6px"
+                "padding": "10px 15px",
+                "border-radius": "8px"
             }
         }
 
         # Apply the appropriate style
         status_value.setStyleSheet(f"""
             font-weight: bold;
-            font-size: 16pt;
+            font-size: 17pt;
             color: {status_styles.get(self.consultation.status.value, {}).get("color", "#212529")};
             background-color: {status_styles.get(self.consultation.status.value, {}).get("background", "#e9ecef")};
             border: {status_styles.get(self.consultation.status.value, {}).get("border", "2px solid #adb5bd")};
-            padding: {status_styles.get(self.consultation.status.value, {}).get("padding", "8px 12px")};
-            border-radius: {status_styles.get(self.consultation.status.value, {}).get("border-radius", "6px")};
+            padding: {status_styles.get(self.consultation.status.value, {}).get("padding", "10px 15px")};
+            border-radius: {status_styles.get(self.consultation.status.value, {}).get("border-radius", "8px")};
         """)
         details_layout.addRow(status_label, status_value)
 
         # Requested date
         requested_label = QLabel("Requested:")
+        requested_label.setStyleSheet("font-weight: bold; color: #495057;")
         requested_value = QLabel(self.consultation.requested_at.strftime("%Y-%m-%d %H:%M"))
+        requested_value.setStyleSheet("font-size: 16pt; color: #343a40;")
         details_layout.addRow(requested_label, requested_value)
 
         # Accepted date (if applicable)
         if self.consultation.accepted_at:
             accepted_label = QLabel("Accepted:")
+            accepted_label.setStyleSheet("font-weight: bold; color: #495057;")
             accepted_value = QLabel(self.consultation.accepted_at.strftime("%Y-%m-%d %H:%M"))
+            accepted_value.setStyleSheet("font-size: 16pt; color: #28a745;")
             details_layout.addRow(accepted_label, accepted_value)
 
         # Busy date (if applicable)
         if self.consultation.busy_at:
             busy_label = QLabel("Marked Busy:")
+            busy_label.setStyleSheet("font-weight: bold; color: #495057;")
             busy_value = QLabel(self.consultation.busy_at.strftime("%Y-%m-%d %H:%M"))
+            busy_value.setStyleSheet("font-size: 16pt; color: #ffc107;")
             details_layout.addRow(busy_label, busy_value)
 
         # Completed date (if applicable)
         if self.consultation.completed_at:
             completed_label = QLabel("Completed:")
+            completed_label.setStyleSheet("font-weight: bold; color: #495057;")
             completed_value = QLabel(self.consultation.completed_at.strftime("%Y-%m-%d %H:%M"))
+            completed_value.setStyleSheet("font-size: 16pt; color: #007bff;")
             details_layout.addRow(completed_label, completed_value)
 
         layout.addWidget(details_frame)
 
-        # Message
+        # Message section with better spacing
         message_label = QLabel("Consultation Details:")
         message_label.setProperty("heading", "true")
         layout.addWidget(message_label)
 
         message_frame = QFrame()
         message_layout = QVBoxLayout(message_frame)
+        message_layout.setContentsMargins(20, 20, 20, 20)  # Better padding inside frame
 
         message_text = QLabel(self.consultation.request_message)
         message_text.setWordWrap(True)
+        message_text.setStyleSheet("""
+            font-size: 15pt;
+            color: #495057;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            line-height: 1.5;
+        """)
         message_layout.addWidget(message_text)
 
         layout.addWidget(message_frame)
 
-        # Close button
+        # Add some stretch to push the button to the bottom
+        layout.addStretch()
+
+        # Close button with better styling and spacing
         button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 20, 0, 0)  # Top margin for button separation
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
         button_layout.addStretch()
         button_layout.addWidget(close_button)
+        button_layout.addStretch()
 
         layout.addLayout(button_layout)
 
@@ -1440,59 +1490,40 @@ class ConsultationPanel(QTabWidget):
         Args:
             tab_index (int): The index of the tab to switch to
         """
-        # Import animation classes if available
+        # Immediately change to the target tab to prevent any shifting issues
+        self.setCurrentIndex(tab_index)
+        
+        # Apply a simple, subtle visual feedback without complex animations
         try:
-            from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup
-            from PyQt5.QtGui import QColor
-
-            # Set the current tab immediately to prevent shifting
+            current_tab_bar = self.tabBar()
+            if current_tab_bar and tab_index < current_tab_bar.count():
+                # Store original style
+                original_style = current_tab_bar.styleSheet()
+                
+                # Create a very subtle highlight effect
+                highlight_style = f"""
+                    QTabBar::tab:selected {{
+                        background-color: #e3f2fd;
+                        border-bottom: 3px solid #228be6;
+                    }}
+                """
+                
+                # Apply highlight temporarily
+                current_tab_bar.setStyleSheet(highlight_style)
+                
+                # Reset after a very short delay
+                def reset_style():
+                    try:
+                        current_tab_bar.setStyleSheet(original_style)
+                    except:
+                        pass
+                
+                QTimer.singleShot(150, reset_style)  # Very brief highlight
+                
+        except Exception as e:
+            # If any error occurs, just ensure the tab is changed without animation
+            logger.debug(f"Tab animation fallback: {e}")
             self.setCurrentIndex(tab_index)
-
-            # Create a gentle highlight animation on the tab instead of moving the whole widget
-            try:
-                current_tab = self.tabBar()
-                original_color = current_tab.palette().color(current_tab.foregroundRole())
-
-                # Create a subtle color transition instead of position animation
-                def create_highlight_effect():
-                    # Set highlight color
-                    highlight_color = QColor("#228be6")
-                    current_tab.setTabTextColor(tab_index, highlight_color)
-                    
-                    # Reset after a brief moment
-                    def reset_color():
-                        current_tab.setTabTextColor(tab_index, original_color)
-                    
-                    # Use shorter duration to prevent jarring effects
-                    QTimer.singleShot(200, reset_color)
-
-                create_highlight_effect()
-
-            except Exception as animation_error:
-                # If animation fails, just change tab without effects
-                logger.debug(f"Tab animation fallback: {animation_error}")
-                pass
-
-        except ImportError:
-            # If animation classes are not available, just change the tab smoothly
-            self.setCurrentIndex(tab_index)
-
-            # Simple flash effect without position changes
-            try:
-                current_style = self.tabBar().tabTextColor(tab_index)
-
-                # Create a timer to reset the color after a brief flash
-                def reset_color():
-                    self.tabBar().setTabTextColor(tab_index, current_style)
-
-                # Set highlight color briefly
-                self.tabBar().setTabTextColor(tab_index, QColor("#228be6"))
-
-                # Reset after a short delay (reduced from 500ms to 200ms)
-                QTimer.singleShot(200, reset_color)
-            except:
-                # If even this fails, just change the tab without animation
-                pass
 
     def on_tab_changed(self, index):
         """

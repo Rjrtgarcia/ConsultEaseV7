@@ -308,23 +308,25 @@ class DashboardWindow(BaseWindow):
         """)
         header_layout.addWidget(welcome_label)
 
-        # Logout button - smaller size as per user preference
+        # Logout button - larger size for better usability
         logout_button = QPushButton("Logout")
-        logout_button.setFixedSize(50, 22)  # Even smaller size
+        logout_button.setFixedSize(90, 35)  # Increased size for better touch interaction
         logout_button.setStyleSheet("""
             QPushButton {
                 background-color: #e74c3c;
                 color: white;
-                border-radius: 3px;
-                font-size: 8pt;  /* Smaller font */
+                border-radius: 6px;
+                font-size: 12pt;  /* Increased font size */
                 font-weight: bold;
-                padding: 1px 2px;
+                padding: 5px 10px;
             }
             QPushButton:hover {
                 background-color: #c0392b;
+                transform: scale(1.02);
             }
             QPushButton:pressed {
                 background-color: #a82315;
+                transform: scale(0.98);
             }
         """)
         logout_button.clicked.connect(self.logout)
