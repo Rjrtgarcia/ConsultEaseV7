@@ -135,19 +135,31 @@ class FacultyResponseController:
             success = self._process_faculty_response(response_data)
 
             if success:
-                # Notify callbacks
-                self._notify_callbacks(response_data)
+                try:
+                    # Notify callbacks with explicit error handling
+                    self._notify_callbacks(response_data)
 
-                # Publish notification about the response
-                notification = {
-                    'type': 'faculty_response',
-                    'faculty_id': faculty_id,
-                    'faculty_name': faculty_name,
-                    'response_type': response_type,
-                    'message_id': message_id,
-                    'timestamp': datetime.now().isoformat()
-                }
-                publish_mqtt_message(MQTTTopics.SYSTEM_NOTIFICATIONS, notification)
+                    # Prepare notification data
+                    notification = {
+                        'type': 'faculty_response',
+                        'faculty_id': faculty_id,
+                        'faculty_name': faculty_name,
+                        'response_type': response_type,
+                        'message_id': message_id,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    # Add extra safety around MQTT publish operation
+                    try:
+                        logger.debug(f"Attempting to publish notification for faculty response: {notification}")
+                        mqtt_result = publish_mqtt_message(MQTTTopics.SYSTEM_NOTIFICATIONS, notification)
+                        logger.debug(f"MQTT publish result for notification: {mqtt_result}")
+                    except Exception as mqtt_e:
+                        logger.error(f"MQTT publish error in handle_faculty_response: {str(mqtt_e)}")
+                        import traceback
+                        logger.error(f"MQTT publish traceback: {traceback.format_exc()}")
+                except Exception as callback_e:
+                    logger.error(f"Error in notification callbacks: {str(callback_e)}")
 
         except Exception as e:
             logger.error(f"Error handling faculty response: {str(e)}")

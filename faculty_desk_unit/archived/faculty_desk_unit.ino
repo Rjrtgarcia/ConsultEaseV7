@@ -3,8 +3,8 @@
 // ================================
 // Capstone Project by Jeysibn
 // WITH ADAPTIVE BLE SCANNER & GRACE PERIOD SYSTEM
-// Date: June 2, 2025 16:17 (Philippines Time)
-// Updated: Added consultation message queue system
+// Date: May 29, 2025 23:19 (Philippines Time)
+// Updated: Added 1-minute grace period for BLE disconnections
 // 
 // ✅ PERFORMANCE OPTIMIZATIONS APPLIED:
 // - Reduced BLE scan frequency from 1s to 8s (major performance fix)
@@ -12,10 +12,6 @@
 // - Optimized main loop timing to reduce from 3241ms to <100ms
 // - Improved button response time with faster debouncing
 // - Better queue processing with exponential backoff
-// ✅ MESSAGE QUEUE SYSTEM ADDED:
-// - Messages no longer overwrite each other
-// - Automatic queue processing after button responses
-// - Visual queue status display
 // ================================
 
 // ✅ CRITICAL FIX: Increase MQTT packet size limit for large responses
@@ -31,16 +27,6 @@
 #include <SPI.h>
 #include <time.h>
 #include "config.h"
-
-struct ConsultationMessage {
-  String content;
-  String consultationId;
-  String studentName;
-  String studentId;
-  String actualMessage;
-  unsigned long timestamp;
-  bool isValid;
-};
 
 // ================================
 // GLOBAL OBJECTS
@@ -97,7 +83,6 @@ bool isMqttReallyConnected() {
 bool timeInitialized = false;
 unsigned long lastAnimationTime = 0;
 bool animationState = false;
-bool systemFullyInitialized = false;  
 
 // Button variables
 bool buttonAPressed = false;
@@ -128,288 +113,6 @@ bool ntpSyncInProgress = false;
 unsigned long lastNtpSyncAttempt = 0;
 int ntpRetryCount = 0;
 String ntpSyncStatus = "PENDING";
-
-// ================================
-// FORWARD DECLARATIONS
-// ================================
-void publishPresenceUpdate();
-void updateMainDisplay();
-void updateSystemStatus();
-
-// Consultation Message Queue variables
-#define MAX_CONSULTATION_QUEUE_SIZE 10
-ConsultationMessage consultationQueue[MAX_CONSULTATION_QUEUE_SIZE];
-int consultationQueueHead = 0;           // Points to the first message to be displayed
-int consultationQueueTail = 0;           // Points to the next position to add a message
-int consultationQueueSize = 0;           // Current number of messages in queue
-bool currentMessageDisplayed = false;    // Is there a message currently being displayed?
-
-// ================================
-// LED NOTIFICATION SYSTEM
-// ================================
-bool messageLedState = false;           // Current LED state (on/off)
-unsigned long lastLedToggle = 0;        // Last time LED was toggled
-bool hasUnreadMessages = false;         // Are there unread messages?
-
-// ================================
-// CONSULTATION MESSAGE QUEUE FUNCTIONS
-// ================================
-
-void initConsultationQueue() {
-  consultationQueueHead = 0;
-  consultationQueueTail = 0;
-  consultationQueueSize = 0;
-  currentMessageDisplayed = false;
-  
-  // Clear all messages
-  for (int i = 0; i < MAX_CONSULTATION_QUEUE_SIZE; i++) {
-    consultationQueue[i].isValid = false;
-    consultationQueue[i].content = "";
-    consultationQueue[i].consultationId = "";
-  }
-  
-  DEBUG_PRINTLN("📥 Consultation message queue initialized");
-}
-
-bool isConsultationQueueEmpty() {
-  return consultationQueueSize == 0;
-}
-
-bool isConsultationQueueFull() {
-  return consultationQueueSize >= MAX_CONSULTATION_QUEUE_SIZE;
-}
-
-void parseConsultationMessage(String messageContent, String consultationId, ConsultationMessage &msg) {
-  msg.content = messageContent;
-  msg.consultationId = consultationId;
-  
-  // Parse student info from message
-  int fromIndex = messageContent.indexOf("From:");
-  int sidIndex = messageContent.indexOf("(SID:");
-  int messageIndex = messageContent.indexOf("): ");
-  
-  if (fromIndex != -1 && sidIndex != -1 && messageIndex != -1) {
-    // Extract student name
-    msg.studentName = messageContent.substring(fromIndex + 5, sidIndex);
-    msg.studentName.trim();
-    
-    // Extract student ID
-    int sidStart = sidIndex + 5;
-    int sidEnd = messageContent.indexOf(")", sidStart);
-    if (sidEnd != -1) {
-      msg.studentId = messageContent.substring(sidStart, sidEnd);
-      msg.studentId.trim();
-    }
-    
-    // Extract actual consultation message
-    msg.actualMessage = messageContent.substring(messageIndex + 3);
-    msg.actualMessage.trim();
-  } else {
-    // Fallback parsing
-    msg.studentName = "Unknown Student";
-    msg.studentId = "N/A";
-    msg.actualMessage = messageContent;
-  }
-  
-  DEBUG_PRINTF("📋 Parsed message - Student: %s, SID: %s, CID: %s\n", 
-               msg.studentName.c_str(), msg.studentId.c_str(), msg.consultationId.c_str());
-}
-
-bool addConsultationToQueue(String messageContent, String consultationId) {
-  DEBUG_PRINTF("📥 Adding consultation to queue: CID=%s, Size=%d/%d\n", 
-               consultationId.c_str(), consultationQueueSize, MAX_CONSULTATION_QUEUE_SIZE);
-  
-  // Parse message content
-  ConsultationMessage newMessage;
-  parseConsultationMessage(messageContent, consultationId, newMessage);
-  
-  if (isConsultationQueueFull()) {
-    DEBUG_PRINTLN("⚠️ Consultation queue is FULL! Dropping oldest message to make room");
-    
-    // Remove oldest message (FIFO behavior)
-    consultationQueueHead = (consultationQueueHead + 1) % MAX_CONSULTATION_QUEUE_SIZE;
-    consultationQueueSize--;
-  }
-  
-  // Add new message to tail
-  consultationQueue[consultationQueueTail] = newMessage;
-  consultationQueue[consultationQueueTail].timestamp = millis();
-  consultationQueue[consultationQueueTail].isValid = true;
-  
-  consultationQueueTail = (consultationQueueTail + 1) % MAX_CONSULTATION_QUEUE_SIZE;
-  consultationQueueSize++;
-  
-  DEBUG_PRINTF("✅ Consultation added to queue. Queue size: %d/%d\n", consultationQueueSize, MAX_CONSULTATION_QUEUE_SIZE);
-
-  updateMessageLED();
-  
-  return true;
-}
-
-ConsultationMessage getNextConsultationFromQueue() {
-  ConsultationMessage emptyMessage;
-  emptyMessage.isValid = false;
-  
-  if (isConsultationQueueEmpty()) {
-    DEBUG_PRINTLN("📭 Consultation queue is empty, no messages to retrieve");
-    return emptyMessage;
-  }
-  
-  ConsultationMessage nextMessage = consultationQueue[consultationQueueHead];
-  
-  // Mark as processed and move head
-  consultationQueue[consultationQueueHead].isValid = false;
-  consultationQueueHead = (consultationQueueHead + 1) % MAX_CONSULTATION_QUEUE_SIZE;
-  consultationQueueSize--;
-  
-  DEBUG_PRINTF("📤 Retrieved consultation from queue. Remaining: %d/%d\n", consultationQueueSize, MAX_CONSULTATION_QUEUE_SIZE);
-  
-  return nextMessage;
-}
-
-void displayQueuedConsultation(ConsultationMessage &msg) {
-  // Set global variables for compatibility with existing button handlers
-  currentMessage = msg.content;
-  g_receivedConsultationId = msg.consultationId;
-  messageDisplayed = true;
-  messageDisplayStart = millis();
-  currentMessageDisplayed = true;
-
-  // 🆕 START LED NOTIFICATION
-  updateMessageLED();
-  
-  // Clear main area
-  tft.fillRect(0, MAIN_AREA_Y, SCREEN_WIDTH, MAIN_AREA_HEIGHT, COLOR_WHITE);
-
-  // Clean message header - smaller and simpler
-  drawSimpleCard(10, MAIN_AREA_Y + 5, SCREEN_WIDTH - 20, 25, COLOR_ACCENT);
-
-  int headerX = getCenterX("CONSULTATION REQUEST", 2);
-  tft.setCursor(headerX, MAIN_AREA_Y + 10);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setTextSize(2);
-  tft.print("CONSULTATION REQUEST");
-
-  // Message content area - starts higher due to smaller header
-  int lineHeight = 20;
-  int maxCharsPerLine = 25;
-  int currentY = MAIN_AREA_Y + 35;
-  int maxLines = 10;
-
-  // Display student name only (no SID)
-  tft.setCursor(15, currentY);
-  tft.setTextColor(COLOR_ACCENT);
-  tft.setTextSize(2);
-  tft.print("From: ");
-  tft.setTextColor(COLOR_BLACK);
-  tft.print(msg.studentName);
-  currentY += lineHeight + 8;
-  
-  // Display consultation message with better spacing
-  tft.setCursor(15, currentY);
-  tft.setTextColor(COLOR_ACCENT);
-  tft.setTextSize(2);
-  tft.print("Message:");
-  currentY += lineHeight + 5;
-  
-  // Display consultation message with word wrapping - more lines available
-  int linesUsed = 0;
-  for (int i = 0; i < msg.actualMessage.length() && linesUsed < maxLines - 2; i += maxCharsPerLine) {
-    String line = msg.actualMessage.substring(i, min(i + maxCharsPerLine, (int)msg.actualMessage.length()));
-    tft.setCursor(15, currentY);
-    tft.setTextColor(COLOR_BLACK);
-    tft.setTextSize(2);
-    tft.print(line);
-    currentY += lineHeight;
-    linesUsed++;
-  }
-
-  DEBUG_PRINTF("📱 Displayed clean consultation: %s (Queue: %d pending)\n", 
-               msg.consultationId.c_str(), consultationQueueSize);
-}
-
-void processNextQueuedConsultation() {
-  if (isConsultationQueueEmpty()) {
-    DEBUG_PRINTLN("📭 No more consultations in queue");
-    currentMessageDisplayed = false;
-    updateMainDisplay(); // Return to normal display
-    return;
-  }
-  
-  DEBUG_PRINTF("📤 Processing next consultation from queue (Queue size: %d)\n", consultationQueueSize);
-  
-  ConsultationMessage nextMessage = getNextConsultationFromQueue();
-  if (nextMessage.isValid) {
-    displayQueuedConsultation(nextMessage);
-  } else {
-    DEBUG_PRINTLN("❌ Invalid consultation retrieved from queue");
-    processNextQueuedConsultation(); // Try next message
-  }
-}
-
-
-// ================================
-// LED NOTIFICATION FUNCTIONS
-// ================================
-
-void initMessageLED() {
-  pinMode(MESSAGE_LED_PIN, OUTPUT);
-  digitalWrite(MESSAGE_LED_PIN, LOW);  // Start with LED off
-  messageLedState = false;
-  lastLedToggle = 0;
-  hasUnreadMessages = false;
-  
-  DEBUG_PRINTF("📡 Message notification LED initialized on pin %d\n", MESSAGE_LED_PIN);
-}
-
-void updateMessageLED() {
-  // Check if we have unread messages (either displayed or in queue)
-  bool shouldBlink = currentMessageDisplayed || (consultationQueueSize > 0);
-  
-  if (shouldBlink != hasUnreadMessages) {
-    hasUnreadMessages = shouldBlink;
-    if (shouldBlink) {
-      DEBUG_PRINTF("💡 LED notification started - %d message(s) pending\n", 
-                   consultationQueueSize + (currentMessageDisplayed ? 1 : 0));
-    } else {
-      DEBUG_PRINTLN("💡 LED notification stopped - no pending messages");
-      digitalWrite(MESSAGE_LED_PIN, LOW);  // Turn off LED
-      messageLedState = false;
-    }
-  }
-  
-  // Handle blinking when there are unread messages
-  if (hasUnreadMessages) {
-    unsigned long now = millis();
-    if (now - lastLedToggle >= LED_BLINK_INTERVAL) {
-      messageLedState = !messageLedState;
-      digitalWrite(MESSAGE_LED_PIN, messageLedState ? HIGH : LOW);
-      lastLedToggle = now;
-      
-      // Debug every 10th blink to avoid spam
-      static int blinkCount = 0;
-      blinkCount++;
-      if (blinkCount % 10 == 0) {
-        DEBUG_PRINTF("💡 LED blink #%d - %d total messages pending\n", 
-                     blinkCount, consultationQueueSize + (currentMessageDisplayed ? 1 : 0));
-      }
-    }
-  }
-}
-
-void testMessageLED() {
-  DEBUG_PRINTLN("🔧 Testing message notification LED...");
-  
-  // Blink 3 times quickly
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(MESSAGE_LED_PIN, HIGH);
-    delay(200);
-    digitalWrite(MESSAGE_LED_PIN, LOW);
-    delay(200);
-  }
-  
-  DEBUG_PRINTLN("✅ LED test complete");
-}
 
 // ================================
 // SIMPLE OFFLINE MESSAGE QUEUE
@@ -622,7 +325,12 @@ bool publishWithQueue(const char* topic, const char* payload, bool isResponse = 
   }
 }
 
-
+// ================================
+// FORWARD DECLARATIONS
+// ================================
+void publishPresenceUpdate();
+void updateMainDisplay();
+void updateSystemStatus();
 
 // ================================
 // BEACON VALIDATOR
@@ -1236,7 +944,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 };
 
 // ================================
-// SIMPLE UI HELPER FUNCTIONS
+// SIMPLE UI HELPER FUNCTIONS (UNCHANGED)
 // ================================
 void drawSimpleCard(int x, int y, int w, int h, uint16_t color) {
   tft.fillRect(x, y, w, h, color);
@@ -1271,14 +979,109 @@ int getCenterX(String text, int textSize) {
 // MESSAGE DISPLAY WITH ENHANCED CONSULTATION REQUEST HANDLING
 // ================================
 void displayIncomingMessage(String message) {
-  // For backward compatibility, parse and display using the new queue system
-  ConsultationMessage tempMessage;
-  parseConsultationMessage(message, g_receivedConsultationId, tempMessage);
-  displayQueuedConsultation(tempMessage);
+  currentMessage = message;
+  messageDisplayed = true;
+  messageDisplayStart = millis();
+
+  // Clear main area
+  tft.fillRect(0, MAIN_AREA_Y, SCREEN_WIDTH, MAIN_AREA_HEIGHT, COLOR_PANEL);
+
+  // Enhanced message header with consultation ID - MADE SMALLER (20px instead of 30px)
+  drawSimpleCard(10, MAIN_AREA_Y + 5, SCREEN_WIDTH - 20, 20, COLOR_ACCENT);
+
+  int headerX = getCenterX("CONSULTATION REQUEST", 1); // Reduced text size from 2 to 1
+  tft.setCursor(headerX, MAIN_AREA_Y + 10); // Adjusted Y position for smaller banner
+  tft.setTextColor(COLOR_BACKGROUND);
+  tft.setTextSize(1); // Reduced from size 2 to 1 to fit in smaller banner
+  tft.print("CONSULTATION REQUEST");
+
+  // Display consultation ID if available - moved up since banner is smaller
+  if (!g_receivedConsultationId.isEmpty()) {
+    tft.setCursor(15, MAIN_AREA_Y + 18); // Moved up from 25 to 18
+    tft.setTextColor(COLOR_BACKGROUND);
+    tft.setTextSize(1);
+    tft.print("ID: " + g_receivedConsultationId);
+  }
+
+  // Message content area with better formatting - starts earlier due to smaller banner
+  tft.setCursor(15, MAIN_AREA_Y + 32); // Moved up from 45 to 32 (saved 13px from smaller banner)
+  tft.setTextColor(COLOR_TEXT);
+  tft.setTextSize(2); // INCREASED from size 1 to 2 for larger, more readable text
+
+  int lineHeight = 18; // INCREASED from 10 to 18 for larger text spacing
+  int maxCharsPerLine = 25; // REDUCED from 38 to 25 due to larger font size
+  int currentY = MAIN_AREA_Y + 32; // Moved up from 45 to 32
+  int maxLines = 8; // INCREASED from 6 to 8 lines - using space freed from removing on-screen buttons
+
+  // Parse and display student info if available
+  int fromIndex = message.indexOf("From:");
+  int sidIndex = message.indexOf("(SID:");
+  int messageIndex = message.indexOf("): ");
+  
+  if (fromIndex != -1 && sidIndex != -1 && messageIndex != -1) {
+    // Extract student name
+    String studentName = message.substring(fromIndex + 5, sidIndex);
+    studentName.trim();
+    
+    // Display student info with LARGER font
+    tft.setCursor(15, currentY);
+    tft.setTextColor(COLOR_ACCENT);
+    tft.setTextSize(2); // INCREASED from size 1 to 2
+    tft.print("Student: ");
+    tft.setTextColor(COLOR_BLACK); // Changed from COLOR_TEXT to COLOR_BLACK for better readability
+    tft.print(studentName);
+    currentY += lineHeight + 4; // INCREASED spacing
+    
+    // Extract and display the actual consultation message
+    String consultationMsg = message.substring(messageIndex + 3);
+    consultationMsg.trim();
+    
+    tft.setCursor(15, currentY);
+    tft.setTextColor(COLOR_ACCENT);
+    tft.setTextSize(2); // INCREASED from size 1 to 2
+    tft.print("Request:");
+    currentY += lineHeight;
+    
+    // Display consultation message with word wrapping - LARGER FONT AND MORE LINES
+    int linesUsed = 0;
+    for (int i = 0; i < consultationMsg.length() && linesUsed < maxLines - 2; i += maxCharsPerLine) {
+      String line = consultationMsg.substring(i, min(i + maxCharsPerLine, (int)consultationMsg.length()));
+      tft.setCursor(15, currentY);
+      tft.setTextColor(COLOR_BLACK); // Changed from COLOR_TEXT to COLOR_BLACK for better readability
+      tft.setTextSize(2); // INCREASED from size 1 to 2 for much larger, easier to read text
+      tft.print(line);
+      currentY += lineHeight;
+      linesUsed++;
+    }
+  } else {
+    // Fallback: display raw message with word wrapping - LARGER FONT AND MORE LINES
+    int linesUsed = 0;
+    for (int i = 0; i < message.length() && linesUsed < maxLines; i += maxCharsPerLine) {
+      String line = message.substring(i, min(i + maxCharsPerLine, (int)message.length()));
+      tft.setCursor(15, currentY);
+      tft.setTextColor(COLOR_BLACK); // Changed from COLOR_TEXT to COLOR_BLACK for better readability
+      tft.setTextSize(2); // INCREASED from size 1 to 2 for much larger, easier to read text
+      tft.print(line);
+      currentY += lineHeight;
+      linesUsed++;
+    }
+  }
+
+  // REMOVED ON-SCREEN BUTTONS - Physical buttons only!
+  // Physical button instructions at bottom of display - NO VISUAL BUTTONS
+  tft.setCursor(15, MAIN_AREA_Y + 120); // Position near bottom of main area
+  tft.setTextColor(COLOR_ACCENT);
+  tft.setTextSize(1);
+  tft.print("Use PHYSICAL buttons: BLUE=Accept | RED=Busy");
+
+  // REMOVED timeout indicator - messages persist until button press
+  // No more "Auto-clear in 30s" message
+
+  DEBUG_PRINTF("📱 Enhanced consultation request displayed (NO AUTO-EXPIRY). ID: %s\n", g_receivedConsultationId.c_str());
 }
 
 // ================================
-// BUTTON RESPONSE FUNCTIONS
+// BUTTON RESPONSE FUNCTIONS (UNCHANGED)
 // ================================
 void handleAcknowledgeButton() {
   DEBUG_PRINTLN("🔵 handleAcknowledgeButton() called!");
@@ -1359,7 +1162,6 @@ void handleAcknowledgeButton() {
 
   // Clear message
   DEBUG_PRINTLN("🧹 Calling clearCurrentMessage()");
-  updateMessageLED(); 
   clearCurrentMessage();
 }
 
@@ -1442,7 +1244,6 @@ void handleBusyButton() {
 
   // Clear message
   DEBUG_PRINTLN("🧹 Calling clearCurrentMessage()");
-  updateMessageLED(); 
   clearCurrentMessage();
 }
 
@@ -1468,22 +1269,16 @@ void showResponseConfirmation(String confirmText, uint16_t color) {
 }
 
 void clearCurrentMessage() {
-  DEBUG_PRINTLN("📱 Consultation message dismissed via physical button");
+  DEBUG_PRINTLN("📱 Consultation message manually dismissed via physical button");
   currentMessage = "";
   messageDisplayed = false;
   messageDisplayStart = 0;
   g_receivedConsultationId = "";
-  currentMessageDisplayed = false;
-  
-  // 🆕 UPDATE LED STATUS
-  updateMessageLED();
-  
-  // Process next consultation in queue
-  processNextQueuedConsultation();
+  updateMainDisplay(); // Return to normal display
 }
 
 // ================================
-// WIFI FUNCTIONS
+// WIFI FUNCTIONS (UNCHANGED)
 // ================================
 void setupWiFi() {
   DEBUG_PRINT("Connecting to WiFi: ");
@@ -1692,7 +1487,7 @@ void checkPeriodicTimeSync() {
 }
 
 // ================================
-// MQTT FUNCTIONS
+// MQTT FUNCTIONS (UNCHANGED)
 // ================================
 void setupMQTT() {
   // ✅ ADD THIS LINE: Set buffer size BEFORE setting server
@@ -1744,46 +1539,51 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   DEBUG_PRINTF("📨 Message received (%d bytes): %s\n", length, messageContent.c_str());
 
   // Parse Consultation ID (CID) from the message
+  // Expected format: "CID:{consultation_id} From:{student_name} (SID:{student_id}): {message}"
   DEBUG_PRINTLN("🔍 Starting CID parsing...");
   int cidStartIndex = messageContent.indexOf("CID:");
   DEBUG_PRINTF("   CID: search index = %d\n", cidStartIndex);
   
+  int cidEndIndex = -1;
   String parsedConsultationId = "";
 
   if (cidStartIndex != -1) {
     cidStartIndex += 4; // Length of "CID:"
-    int cidEndIndex = messageContent.indexOf(" ", cidStartIndex);
+    DEBUG_PRINTF("   CID: start position = %d\n", cidStartIndex);
+    
+    cidEndIndex = messageContent.indexOf(" ", cidStartIndex); // Assume CID ends before the next space
+    DEBUG_PRINTF("   CID: end position = %d\n", cidEndIndex);
     
     if (cidEndIndex != -1) {
       parsedConsultationId = messageContent.substring(cidStartIndex, cidEndIndex);
     } else {
-      parsedConsultationId = messageContent.substring(cidStartIndex);
+      // If no space, maybe it's at the end of a short message part (less likely for full message)
+      // Or handle if the format guarantees CID is followed by a specific delimiter or is the first part.
+      // For now, this basic parsing assumes a space after CID.
+      // A more robust parser might be needed if message format varies greatly.
+      DEBUG_PRINTLN("   CID: No space found after CID, taking rest of string");
+      parsedConsultationId = messageContent.substring(cidStartIndex); // Fallback: take rest of string (less safe)
     }
-    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): '%s'\n", parsedConsultationId.c_str());
+    g_receivedConsultationId = parsedConsultationId;
+    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): '%s'\n", g_receivedConsultationId.c_str());
   } else {
+    g_receivedConsultationId = ""; // Clear if not found, or handle error
     DEBUG_PRINTLN("⚠️ Consultation ID (CID:) not found in message.");
-    return; // Skip messages without CID
+    // If CID is mandatory for further processing, might want to ignore message or send error.
+    // For now, we'll proceed, but responses might fail to link in central system if CID is missing.
   }
   
   bool facultyPresent = presenceDetector.getPresence();
   DEBUG_PRINTF("👤 Faculty presence check: %s\n", facultyPresent ? "PRESENT" : "AWAY");
   
-  if (!facultyPresent) {
-    DEBUG_PRINTLN("📭 Message ignored - Professor is AWAY");
-    return;
-  }
-
-  // NEW QUEUE LOGIC: Check if a message is currently being displayed
-  if (currentMessageDisplayed) {
-    DEBUG_PRINTLN("📥 Message currently displayed, adding new consultation to queue");
-    addConsultationToQueue(messageContent, parsedConsultationId);
+  if (facultyPresent) {
+    lastReceivedMessage = messageContent; // Store the full message for display
+    DEBUG_PRINTF("💾 Stored message in lastReceivedMessage: '%s'\n", lastReceivedMessage.c_str());
+    DEBUG_PRINTLN("📱 Calling displayIncomingMessage()");
+    displayIncomingMessage(messageContent); // Display the full message
+    DEBUG_PRINTF("🎯 Message display state - messageDisplayed: %s\n", messageDisplayed ? "TRUE" : "FALSE");
   } else {
-    DEBUG_PRINTLN("📱 No message currently displayed, showing consultation immediately");
-    
-    // Parse and display immediately
-    ConsultationMessage newMessage;
-    parseConsultationMessage(messageContent, parsedConsultationId, newMessage);
-    displayQueuedConsultation(newMessage);
+    DEBUG_PRINTLN("📭 Message ignored - Professor is AWAY");
   }
 }
 
@@ -1866,7 +1666,7 @@ void publishHeartbeat() {
 }
 
 // ================================
-// BLE FUNCTIONS
+// BLE FUNCTIONS (UNCHANGED)
 // ================================
 void setupBLE() {
   DEBUG_PRINTLN("Initializing BLE...");
@@ -1882,14 +1682,14 @@ void setupBLE() {
 }
 
 // ================================
-// DISPLAY FUNCTIONS
+// DISPLAY FUNCTIONS (UNCHANGED - Your existing display logic!)
 // ================================
 void setupDisplay() {
   tft.init(240, 320);
   tft.setRotation(3);
-  tft.fillScreen(COLOR_BLACK);
+  tft.fillScreen(COLOR_WHITE);
 
-  DEBUG_PRINTLN("Display initialized - With Grace Period BLE System + Message Queue");
+  DEBUG_PRINTLN("Display initialized - With Grace Period BLE System");
 
   tft.fillScreen(COLOR_BACKGROUND);
 
@@ -1903,10 +1703,10 @@ void setupDisplay() {
   tft.setTextColor(COLOR_TEXT);
   tft.print("DESK UNIT");
 
-  tft.setCursor(getCenterX("Message Queue System", 1), 160);
+  tft.setCursor(getCenterX("Grace Period BLE", 1), 160);
   tft.setTextSize(1);
   tft.setTextColor(COLOR_ACCENT);
-  tft.print("Message Queue System");
+  tft.print("Grace Period BLE");
 
   delay(2000);
 }
@@ -1914,35 +1714,27 @@ void setupDisplay() {
 void drawCompleteUI() {
   tft.fillScreen(COLOR_BACKGROUND);
 
-  // Top panel with professor info
   tft.fillRect(0, TOP_PANEL_Y, SCREEN_WIDTH, TOP_PANEL_HEIGHT, COLOR_PANEL);
 
   tft.setCursor(PROFESSOR_NAME_X, PROFESSOR_NAME_Y);
   tft.setTextColor(COLOR_ACCENT);
-  tft.setTextSize(2);
+  tft.setTextSize(1);
   tft.print("PROFESSOR: ");
-  tft.setTextSize(2);
+  tft.setTextSize(1);
   tft.print(FACULTY_NAME);
 
-  //tft.setCursor(DEPARTMENT_X, DEPARTMENT_Y);
-  //tft.setTextColor(COLOR_ACCENT);
- // tft.setTextSize(1);
-  //tft.print("DEPARTMENT: ");
- // tft.print(FACULTY_DEPARTMENT);
+  tft.setCursor(DEPARTMENT_X, DEPARTMENT_Y);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.setTextSize(1);
+  tft.print("DEPARTMENT: ");
+  tft.print(FACULTY_DEPARTMENT);
 
-  // Only show status panel during initialization
-  if (!systemFullyInitialized) {
-    tft.fillRect(0, STATUS_PANEL_Y, SCREEN_WIDTH, STATUS_PANEL_HEIGHT, COLOR_PANEL_DARK);
-    updateSystemStatus();
-  } else {
-    // Hide status panel - fill with background color
-    tft.fillRect(0, STATUS_PANEL_Y, SCREEN_WIDTH, STATUS_PANEL_HEIGHT, COLOR_BACKGROUND);
-  }
-
+  tft.fillRect(0, STATUS_PANEL_Y, SCREEN_WIDTH, STATUS_PANEL_HEIGHT, COLOR_PANEL_DARK);
   tft.fillRect(0, BOTTOM_PANEL_Y, SCREEN_WIDTH, BOTTOM_PANEL_HEIGHT, COLOR_PANEL);
 
   updateTimeAndDate();
   updateMainDisplay();
+  updateSystemStatus();
 }
 
 void updateMainDisplay() {
@@ -1985,75 +1777,72 @@ void updateMainDisplay() {
 }
 
 void updateSystemStatus() {
-  // Only show status during initialization
-  if (!systemFullyInitialized) {
-    tft.fillRect(2, STATUS_PANEL_Y + 1, SCREEN_WIDTH - 4, STATUS_PANEL_HEIGHT - 2, COLOR_PANEL_DARK);
+  tft.fillRect(2, STATUS_PANEL_Y + 1, SCREEN_WIDTH - 4, STATUS_PANEL_HEIGHT - 2, COLOR_PANEL_DARK);
 
-    int topLineY = STATUS_PANEL_Y + 3;
+  int topLineY = STATUS_PANEL_Y + 3;
 
-    tft.setCursor(10, topLineY);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.setTextSize(1);
-    tft.print("WiFi:");
-    if (wifiConnected) {
-      tft.setTextColor(COLOR_SUCCESS);
-      tft.print("CONNECTED");
-    } else {
-      tft.setTextColor(COLOR_ERROR);
-      tft.print("FAILED");
-    }
-
-    tft.setCursor(120, topLineY);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.print("MQTT:");
-    if (mqttConnected) {
-      tft.setTextColor(COLOR_SUCCESS);
-      tft.print("ONLINE");
-    } else {
-      tft.setTextColor(COLOR_ERROR);
-      tft.print("OFFLINE");
-    }
-
-    tft.setCursor(230, topLineY);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.print("BLE:");
+  tft.setCursor(10, topLineY);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.setTextSize(1);
+  tft.print("WiFi:");
+  if (wifiConnected) {
     tft.setTextColor(COLOR_SUCCESS);
-    tft.print("ACTIVE");
+    tft.print("CONNECTED");
+  } else {
+    tft.setTextColor(COLOR_ERROR);
+    tft.print("FAILED");
+  }
 
-    int bottomLineY = STATUS_PANEL_Y + 15;
+  tft.setCursor(120, topLineY);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.print("MQTT:");
+  if (mqttConnected) {
+    tft.setTextColor(COLOR_SUCCESS);
+    tft.print("ONLINE");
+  } else {
+    tft.setTextColor(COLOR_ERROR);
+    tft.print("OFFLINE");
+  }
 
-    tft.setCursor(10, bottomLineY);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.print("TIME:");
-    if (timeInitialized) {
-      tft.setTextColor(COLOR_SUCCESS);
-      tft.print("SYNCED");
-    } else if (ntpSyncInProgress) {
-      tft.setTextColor(COLOR_WARNING);
-      tft.print("SYNCING");
-    } else if (ntpSyncStatus == "FAILED") {
-      tft.setTextColor(COLOR_ERROR);
-      tft.print("FAILED");
-    } else {
-      tft.setTextColor(COLOR_WARNING);
-      tft.print("PENDING");
-    }
+  tft.setCursor(230, topLineY);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.print("BLE:");
+  tft.setTextColor(COLOR_SUCCESS);
+  tft.print("ACTIVE");
 
-    tft.setCursor(120, bottomLineY);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.print("RAM:");
-    int freeHeapKB = ESP.getFreeHeap() / 1024;
-    tft.printf("%dKB", freeHeapKB);
+  int bottomLineY = STATUS_PANEL_Y + 15;
 
-    tft.setCursor(200, bottomLineY);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.print("UPTIME:");
-    unsigned long uptimeMinutes = millis() / 60000;
-    if (uptimeMinutes < 60) {
-      tft.printf("%dm", uptimeMinutes);
-    } else {
-      tft.printf("%dh%dm", uptimeMinutes / 60, uptimeMinutes % 60);
-    }
+  tft.setCursor(10, bottomLineY);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.print("TIME:");
+  if (timeInitialized) {
+    tft.setTextColor(COLOR_SUCCESS);
+    tft.print("SYNCED");
+  } else if (ntpSyncInProgress) {
+    tft.setTextColor(COLOR_WARNING);
+    tft.print("SYNCING");
+  } else if (ntpSyncStatus == "FAILED") {
+    tft.setTextColor(COLOR_ERROR);
+    tft.print("FAILED");
+  } else {
+    tft.setTextColor(COLOR_WARNING);
+    tft.print("PENDING");
+  }
+
+  tft.setCursor(120, bottomLineY);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.print("RAM:");
+  int freeHeapKB = ESP.getFreeHeap() / 1024;
+  tft.printf("%dKB", freeHeapKB);
+
+  tft.setCursor(200, bottomLineY);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.print("UPTIME:");
+  unsigned long uptimeMinutes = millis() / 60000;
+  if (uptimeMinutes < 60) {
+    tft.printf("%dm", uptimeMinutes);
+  } else {
+    tft.printf("%dh%dm", uptimeMinutes / 60, uptimeMinutes % 60);
   }
 }
 
@@ -2067,13 +1856,12 @@ void setup() {
   }
 
   DEBUG_PRINTLN("=== NU FACULTY DESK UNIT - ENHANCED CONSULTATION SYSTEM ===");
-  DEBUG_PRINTLN("=== PERSISTENT MESSAGES + MESSAGE QUEUE + PHYSICAL BUTTON CONTROL ===");
+  DEBUG_PRINTLN("=== PERSISTENT MESSAGES + PHYSICAL BUTTON CONTROL ===");
   DEBUG_PRINTLN("=== PERFORMANCE OPTIMIZED VERSION ===");
   DEBUG_PRINTLN("✅ BLE scan frequency reduced from 1s to 8s");
   DEBUG_PRINTLN("✅ Enhanced MQTT reliability with forced processing");
   DEBUG_PRINTLN("✅ Optimized main loop for <100ms response time");
   DEBUG_PRINTLN("✅ Improved button debouncing for faster response");
-  DEBUG_PRINTLN("✅ Message queue system prevents message loss");
 
   if (!validateConfiguration()) {
     while(true) delay(5000);
@@ -2088,11 +1876,9 @@ void setup() {
   // Initialize offline operation system
   DEBUG_PRINTLN("🔄 Initializing optimized offline operation system...");
   initOfflineQueue();
-  initConsultationQueue();
 
   // Initialize components
   buttons.init();
-  initMessageLED();
   setupDisplay();
   setupWiFi();
 
@@ -2103,15 +1889,12 @@ void setup() {
   setupBLE();
   adaptiveScanner.init(&presenceDetector);  // Pass reference to presence detector
 
-  DEBUG_PRINTLN("=== OPTIMIZED CONSULTATION SYSTEM WITH MESSAGE QUEUE READY ===");
+  DEBUG_PRINTLN("=== OPTIMIZED CONSULTATION SYSTEM READY ===");
   DEBUG_PRINTLN("✅ BLE disconnections now have 1-minute grace period!");
   DEBUG_PRINTLN("✅ Consultation messages persist until physical button press!");
-  DEBUG_PRINTLN("✅ Message queue prevents consultation loss!");
   DEBUG_PRINTLN("✅ Larger, more readable consultation message display!");
   DEBUG_PRINTLN("✅ Physical button-only control (no on-screen buttons)!");
   DEBUG_PRINTLN("✅ Performance optimized for fast button response!");
-  testMessageLED();
-  systemFullyInitialized = true;
   drawCompleteUI();
 }
 
@@ -2134,10 +1917,7 @@ void loop() {
   // Run button updates multiple times per main loop to catch quick presses
   for (int i = 0; i < 3; i++) {  // Reduced from 5 to 3 for performance
     buttons.update();
-
-    // 🆕 UPDATE LED FREQUENTLY FOR SMOOTH BLINKING
-    updateMessageLED();
-
+    
     // Handle button presses immediately
     if (buttons.isButtonAPressed()) {
       DEBUG_PRINTLN("🎯 BUTTON A PRESS DETECTED IN MAIN LOOP!");
@@ -2198,9 +1978,8 @@ void loop() {
   }
 
   // Update system status every 15 seconds (increased from 10)
-    // Update system status only during initialization
   static unsigned long lastStatusUpdate = 0;
-  if (!systemFullyInitialized && millis() - lastStatusUpdate > 15000) {
+  if (millis() - lastStatusUpdate > 15000) { // Increased frequency
     updateSystemStatus();
     lastStatusUpdate = millis();
   }
@@ -2259,5 +2038,5 @@ void loop() {
 }
 
 // ================================
-// END OF ENHANCED SYSTEM WITH MESSAGE QUEUE
+// END OF GRACE PERIOD ENHANCED SYSTEM
 // ================================

@@ -82,9 +82,21 @@ class AsyncMQTTService:
     def _initialize_client(self):
         """Initialize MQTT client with callbacks."""
         try:
+            # Clean up any existing client first
+            if self.client:
+                try:
+                    if self.is_connected:
+                        self.client.disconnect()
+                    self.client.loop_stop(force=True)
+                    logger.debug("Cleaned up existing MQTT client before initialization")
+                except Exception as e:
+                    logger.error(f"Error cleaning up existing MQTT client: {e}")
+            
             # Generate a unique client ID
             client_id = f"ConsultEaseClient_{uuid.uuid4()}"
-            self.client = mqtt.Client(client_id=client_id)
+            
+            # Create client with clean_session=True to avoid retained session issues
+            self.client = mqtt.Client(client_id=client_id, clean_session=True)
 
             # Set authentication if provided
             if self.username and self.password:
@@ -101,12 +113,16 @@ class AsyncMQTTService:
             self.client.reconnect_delay_set(min_delay=1, max_delay=120)
             self.client.max_inflight_messages_set(20)
             self.client.max_queued_messages_set(100)
-
+            
+            # Set a shorter keepalive to detect disconnections earlier
+            self.client.connect_async(self.broker_host, self.broker_port, keepalive=30)
+            
             logger.debug("MQTT client initialized")
 
         except Exception as e:
             logger.error(f"Error initializing MQTT client: {e}")
             self.last_error = str(e)
+            self.client = None  # Clear the client on initialization failure
 
     def _on_connect(self, client, userdata, flags, rc):
         """Handle MQTT connection."""
@@ -447,30 +463,55 @@ class AsyncMQTTService:
                     logger.debug("Publish worker received sentinel, exiting.")
                     break
 
-                if not self.is_connected:
+                # Robust connection check
+                is_connected = False
+                try:
+                    if self.client:
+                        is_connected = self.client.is_connected()
+                    else:
+                        is_connected = False
+                except Exception as e:
+                    logger.error(f"Error checking connection status: {e}")
+                    is_connected = False
+                    
+                if not is_connected:
                     logger.warning(f"Cannot publish to {message['topic']}: not connected")
                     self.publish_errors += 1
                     continue
 
                 # Prepare payload
-                if isinstance(message['data'], str):
-                    payload = message['data']
-                else:
-                    payload = json.dumps(message['data'])
+                try:
+                    if isinstance(message['data'], str):
+                        payload = message['data']
+                    else:
+                        payload = json.dumps(message['data'])
+                except Exception as e:
+                    logger.error(f"Error serializing payload: {e}")
+                    self.publish_errors += 1
+                    continue
 
-                # Publish message
-                result = self.client.publish(
-                    message['topic'],
-                    payload,
-                    qos=message['qos'],
-                    retain=message['retain']
-                )
+                # Publish message with explicit error handling
+                try:
+                    if not self.client:
+                        logger.error("MQTT client is None, cannot publish")
+                        self.publish_errors += 1
+                        continue
+                        
+                    result = self.client.publish(
+                        message['topic'],
+                        payload,
+                        qos=message['qos'],
+                        retain=message['retain']
+                    )
 
-                if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                    self.messages_published += 1
-                    logger.debug(f"Published message to {message['topic']}")
-                else:
-                    logger.error(f"Failed to publish to {message['topic']}: {result.rc}")
+                    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                        self.messages_published += 1
+                        logger.debug(f"Published message to {message['topic']}")
+                    else:
+                        logger.error(f"Failed to publish to {message['topic']}: {result.rc}")
+                        self.publish_errors += 1
+                except Exception as e:
+                    logger.error(f"Exception during publish: {e}")
                     self.publish_errors += 1
 
             except Empty:
@@ -479,6 +520,8 @@ class AsyncMQTTService:
             except Exception as e:
                 logger.error(f"Error in publish worker: {e}")
                 self.publish_errors += 1
+                # Sleep briefly to avoid tight loop on persistent errors
+                time.sleep(0.1)
 
     def _connection_monitor(self):
         """Monitor connection and handle reconnection."""

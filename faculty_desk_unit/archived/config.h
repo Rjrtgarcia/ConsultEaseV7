@@ -1,66 +1,68 @@
-// ================================
-// FACULTY DESK UNIT - SIMPLE SETUP TEMPLATE
-// ================================
-// Copy this to 'config.h' and fill in your details
-
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// ===== CHANGE THESE FOR EACH FACULTY UNIT =====
-#define FACULTY_ID 1                           // Unique ID (1, 2, 3, etc.)
-#define FACULTY_NAME "Your Name"               // Professor's name
-#define FACULTY_DEPARTMENT "Your Department"   // Department name
-#define FACULTY_BEACON_MAC "XX:XX:XX:XX:XX:XX" // Your iBeacon MAC address
+// ================================
+// FACULTY DESK UNIT - SIMPLIFIED CONFIGURATION
+// ================================
+// Updated: Simplified for easier maintenance and deployment
 
-// ===== CHANGE THESE FOR YOUR NETWORK =====
-#define WIFI_SSID "Your_WiFi_Name"             // WiFi network name
-#define WIFI_PASSWORD "Your_WiFi_Password"     // WiFi password
-#define MQTT_SERVER "192.168.1.100"           // MQTT broker IP address
-#define MQTT_USERNAME "faculty_desk"           // MQTT username
-#define MQTT_PASSWORD "desk_password"          // MQTT password
+// ===== REQUIRED FACULTY INFORMATION =====
+#define FACULTY_ID 1
+#define FACULTY_NAME "Dave Jomillo"
+#define FACULTY_DEPARTMENT "Helpdesk"
 
-// ===== HARDWARE PINS (CHANGE IF DIFFERENT) =====
-#define BUTTON_A_PIN 15  // Blue button (Acknowledge)
-#define BUTTON_B_PIN 4   // Red button (Busy)
-#define TFT_CS 5         // Display CS pin
-#define TFT_RST 22       // Display RST pin  
-#define TFT_DC 21        // Display DC pin
-
-// ===== DEFAULT SETTINGS (USUALLY NO NEED TO CHANGE) =====
+// ===== REQUIRED NETWORK SETTINGS =====
+#define WIFI_SSID "HUAWEI-2.4G-37Pf"
+#define WIFI_PASSWORD "7981526rtg"
+#define MQTT_SERVER "192.168.100.3"
 #define MQTT_PORT 1883
-#define MQTT_KEEPALIVE 60
-#define MQTT_QOS 1
-#define MQTT_CLIENT_ID "Faculty_Desk_Unit_" TOSTRING(FACULTY_ID)
+#define MQTT_USERNAME ""
+#define MQTT_PASSWORD ""
 
-// BLE timing
+// ===== REQUIRED BLE BEACON SETTINGS =====
+#define FACULTY_BEACON_MAC "51:00:25:04:02:A2"
+
+// ===== HARDWARE PIN CONFIGURATION =====
+// Display pins (ST7789 2.4" 320x240)
+#define TFT_CS 5
+#define TFT_RST 22
+#define TFT_DC 21
+
+// Button pins
+#define BUTTON_A_PIN 16  // Blue button (Acknowledge)
+#define BUTTON_B_PIN 4   // Red button (Busy)
+
+// ===== SIMPLIFIED TIMING SETTINGS =====
+// BLE Detection
 #define BLE_SCAN_INTERVAL_SEARCHING 2000    // Fast scan when away (2s)
-#define BLE_SCAN_INTERVAL_MONITORING 8000   // Slow scan when present (8s) 
+#define BLE_SCAN_INTERVAL_MONITORING 8000   // Slow scan when present (8s)
 #define BLE_SCAN_INTERVAL_VERIFICATION 1000 // Quick scan during transitions
 #define BLE_GRACE_PERIOD_MS 60000           // 1 minute grace period
+#define BLE_RECONNECT_ATTEMPT_INTERVAL 5000 // Reconnect every 5s
 
 // Network timeouts
 #define WIFI_CONNECT_TIMEOUT 20000          // 20 seconds
 #define WIFI_RECONNECT_INTERVAL 5000        // 5 seconds between WiFi reconnect attempts
+#define MQTT_KEEPALIVE 60                   // 60 seconds
+#define MQTT_QOS 1                          // MQTT Quality of Service
+#define MQTT_CLIENT_ID "Faculty_Desk_Unit_" TOSTRING(FACULTY_ID) // MQTT client identifier
 
 // UI timing
 #define BUTTON_DEBOUNCE_DELAY 20            // 20ms button debounce
 #define CONFIRMATION_DISPLAY_TIME 2000      // 2s confirmation display
 
-// System settings
-#define ENABLE_SERIAL_DEBUG true
-#define SERIAL_BAUD_RATE 115200
-#define MAX_MESSAGE_LENGTH 512
-#define HEARTBEAT_INTERVAL 300000           // 5 minutes
-#define TIME_ZONE_OFFSET 8                  // GMT+8 Philippines
-
-// ===== AUTO-GENERATED TOPICS (DO NOT CHANGE) =====
+// ===== MQTT TOPICS (AUTO-GENERATED) =====
 #define MQTT_TOPIC_STATUS "consultease/faculty/" TOSTRING(FACULTY_ID) "/status"
 #define MQTT_TOPIC_MESSAGES "consultease/faculty/" TOSTRING(FACULTY_ID) "/messages"
 #define MQTT_TOPIC_RESPONSES "consultease/faculty/" TOSTRING(FACULTY_ID) "/responses"
 #define MQTT_TOPIC_HEARTBEAT "consultease/faculty/" TOSTRING(FACULTY_ID) "/heartbeat"
+
+// Legacy compatibility
 #define MQTT_LEGACY_STATUS "faculty/" TOSTRING(FACULTY_ID) "/status"
 
-// ===== DISPLAY SETTINGS (DO NOT CHANGE) =====
+
+
+// ===== DISPLAY LAYOUT (SIMPLIFIED) =====
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 240
 #define MAIN_AREA_Y 35
@@ -86,7 +88,8 @@
 #define DATE_X 250
 #define DATE_Y 220
 
-// ===== COLORS (DO NOT CHANGE) =====
+// ===== COLOR SCHEME (SIMPLIFIED) =====
+// Basic colors (display-specific)
 #define COLOR_WHITE      0x0000  // White
 #define COLOR_BLACK      0xFFFF  // Black
 #define COLOR_SUCCESS    0xF81F  // Green
@@ -100,35 +103,43 @@
 #define COLOR_TEXT       COLOR_WHITE
 #define COLOR_GRAY_LIGHT 0x7BEF
 
-// ===== NTP SERVERS (DO NOT CHANGE) =====
+// ===== SYSTEM SETTINGS =====
+#define ENABLE_SERIAL_DEBUG true
+#define SERIAL_BAUD_RATE 115200
+#define MAX_MESSAGE_LENGTH 512
+#define MQTT_MAX_PACKET_SIZE 768 
+#define HEARTBEAT_INTERVAL 300000  // 5 minutes
+#define TIME_ZONE_OFFSET 8         // GMT+8 Philippines
+
+// ===== NTP SERVERS =====
 #define NTP_SERVER_PRIMARY "pool.ntp.org"
-#define NTP_SERVER_SECONDARY "time.nist.gov" 
+#define NTP_SERVER_SECONDARY "time.nist.gov"
 #define NTP_SERVER_TERTIARY "time.google.com"
 #define NTP_SYNC_TIMEOUT 10000        // 10 seconds
 #define NTP_UPDATE_INTERVAL 7200000   // 2 hours
 #define NTP_RETRY_INTERVAL 30000      // 30 seconds
 #define NTP_MAX_RETRIES 3             // Maximum retries
 
-// ===== ADVANCED BLE SETTINGS (DO NOT CHANGE) =====
+// ===== ADVANCED BLE SETTINGS (OPTIONAL) =====
 #define BLE_SCAN_DURATION_QUICK 1
 #define BLE_SCAN_DURATION_FULL 3
 #define BLE_SIGNAL_STRENGTH_THRESHOLD -80
-#define BLE_RECONNECT_ATTEMPT_INTERVAL 5000
 #define BLE_RECONNECT_MAX_ATTEMPTS 12
 #define PRESENCE_CONFIRM_TIME 6000            // Time to confirm presence change
 #define BLE_STATS_REPORT_INTERVAL 60000      // Report stats every minute
 
-// ===== HELPER MACROS (DO NOT CHANGE) =====
+// ===== HELPER MACROS =====
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 #define DEBUG_PRINT(x) if(ENABLE_SERIAL_DEBUG) Serial.print(x)
 #define DEBUG_PRINTLN(x) if(ENABLE_SERIAL_DEBUG) Serial.println(x)
 #define DEBUG_PRINTF(format, ...) if(ENABLE_SERIAL_DEBUG) Serial.printf(format, ##__VA_ARGS__)
 
-// ===== VALIDATION (DO NOT CHANGE) =====
+// ===== CONFIGURATION VALIDATION =====
 inline bool validateConfiguration() {
   bool valid = true;
 
+  // Check required settings
   if (FACULTY_ID < 1) {
     DEBUG_PRINTLN("❌ ERROR: FACULTY_ID must be >= 1");
     valid = false;
@@ -168,4 +179,4 @@ inline bool validateConfiguration() {
   return valid;
 }
 
-#endif // CONFIG_H 
+#endif // CONFIG_H

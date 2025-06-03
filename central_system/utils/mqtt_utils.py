@@ -6,10 +6,14 @@ Provides convenient access to the async MQTT service.
 import logging
 import json
 import inspect
+import threading
 from typing import Any, Optional
 from ..services.async_mqtt_service import get_async_mqtt_service
 
 logger = logging.getLogger(__name__)
+
+# Add a thread lock for MQTT publishing operations
+_mqtt_publish_lock = threading.Lock()
 
 
 def get_mqtt_service():
@@ -26,6 +30,7 @@ def publish_mqtt_message(topic: str, payload: any, qos: int = 0, retain: bool = 
     """
     Publish a message to an MQTT topic using the async MQTT service.
     Includes detailed diagnostic logging of publish attempts.
+    Added thread safety with locks to prevent concurrent access issues.
 
     Args:
         topic: MQTT topic to publish to
@@ -37,30 +42,60 @@ def publish_mqtt_message(topic: str, payload: any, qos: int = 0, retain: bool = 
         bool: True if message was queued successfully, False otherwise
     """
     from .mqtt_topics import MQTTTopics
-    client = get_async_mqtt_service().client
     publish_successful = False
 
-    if client and client.is_connected():
+    try:
+        # Safely get the MQTT client with error handling
+        mqtt_service = get_async_mqtt_service()
+        if mqtt_service is None:
+            logger.error("Failed to get MQTT service, service is None")
+            return False
+            
+        client = mqtt_service.client
+        if client is None:
+            logger.error("Failed to get MQTT client, client is None")
+            return False
+
+        # Check connection status safely
+        is_connected = False
+        try:
+            is_connected = client.is_connected()
+        except Exception as e:
+            logger.error(f"Error checking MQTT connection status: {str(e)}")
+            return False
+
+        if not is_connected:
+            logger.warning(f"MQTT client not connected. Cannot publish to {topic}")
+            return False
+
+        # Prepare the payload safely
         try:
             if isinstance(payload, dict) or isinstance(payload, list):
                 message_str = json.dumps(payload)
             else:
                 message_str = str(payload)
-            
-            result = client.publish(topic, message_str, qos=qos, retain=retain)
-            
-            if result.rc == 0:
-                publish_successful = True
-            else:
-                logger.error(f"Failed to publish to {topic} - MQTT Error Code: {result.rc}")
+        except Exception as e:
+            logger.error(f"Error serializing payload for topic {topic}: {str(e)}")
+            return False
+
+        # Use a lock to ensure thread safety during publish operation
+        with _mqtt_publish_lock:
+            try:
+                result = client.publish(topic, message_str, qos=qos, retain=retain)
+                
+                if result.rc == 0:
+                    publish_successful = True
+                else:
+                    logger.error(f"Failed to publish to {topic} - MQTT Error Code: {result.rc}")
+                    publish_successful = False
+
+            except Exception as e:
+                logger.error(f"Exception during MQTT publish to {topic}: {str(e)}")
                 publish_successful = False
 
-        except Exception as e:
-            logger.error(f"Exception during MQTT publish to {topic}: {str(e)}")
-            publish_successful = False
-    else:
-        logger.warning(f"MQTT client not available or not connected. Cannot publish to {topic}")
-        publish_successful = False
+    except Exception as e:
+        logger.error(f"Unexpected exception in publish_mqtt_message: {str(e)}")
+        return False
 
     # ===== DETAILED DIAGNOSTIC LOGGING =====
     try:
