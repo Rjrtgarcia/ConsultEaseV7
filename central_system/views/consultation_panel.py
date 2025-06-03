@@ -879,6 +879,7 @@ class ConsultationHistoryPanel(QFrame):
                 "faculty/+/responses",  # Legacy compatibility
                 "consultation/+/status",  # Real-time status updates
                 "faculty/+/status",  # Faculty availability updates
+                "professor/messages",  # Faculty desk unit responses (IMPORTANT!)
             ]
             
             for topic in topics:
@@ -916,31 +917,48 @@ class ConsultationHistoryPanel(QFrame):
         try:
             import json
             
+            # Enhanced logging for debugging
+            logger.info(f"🔥 CONSULTATION PANEL - Processing MQTT message:")
+            logger.info(f"🔥 Topic: {topic}")
+            logger.info(f"🔥 Data Type: {type(data)}")
+            logger.info(f"🔥 Raw Data: {data}")
+            
             # Parse the message
             if isinstance(data, str):
                 message_str = data
                 try:
                     response_data = json.loads(message_str)
+                    logger.info(f"🔥 Parsed JSON: {response_data}")
                 except json.JSONDecodeError:
                     # Handle non-JSON messages
                     response_data = {'raw_message': message_str, 'topic': topic}
+                    logger.info(f"🔥 Non-JSON message, created wrapper: {response_data}")
             elif isinstance(data, dict):
                 response_data = data
                 message_str = json.dumps(data) if data else str(data)
+                logger.info(f"🔥 Dict data received: {response_data}")
             else:
                 response_data = {'raw_message': str(data), 'topic': topic}
                 message_str = str(data)
+                logger.info(f"🔥 Unknown data type, created wrapper: {response_data}")
                 
-            logger.info(f"Received MQTT message on {topic}: {message_str}")
+            logger.info(f"🔥 Final response_data: {response_data}")
             
             # Process different types of updates
-            if 'consultation' in topic.lower() or 'responses' in topic.lower():
+            if 'consultation' in topic.lower() or 'responses' in topic.lower() or 'professor/messages' in topic.lower():
+                logger.info(f"🔥 Routing to consultation update handler")
                 self._handle_consultation_update(response_data, topic)
             elif 'status' in topic.lower():
+                logger.info(f"🔥 Routing to status update handler")
                 self._handle_status_update(response_data, topic)
+            else:
+                logger.info(f"🔥 Unknown topic type, routing to consultation update as fallback")
+                self._handle_consultation_update(response_data, topic)
                 
         except Exception as e:
-            logger.error(f"Error processing MQTT message: {e}")
+            logger.error(f"🔥 Error processing MQTT message: {e}")
+            import traceback
+            logger.error(f"🔥 Traceback: {traceback.format_exc()}")
 
     def _handle_consultation_update(self, response_data, topic):
         """
@@ -951,28 +969,63 @@ class ConsultationHistoryPanel(QFrame):
             
         student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
         
-        # Extract message details
-        message_id = response_data.get('message_id', '')
+        # Extract message details from different possible formats
+        message_id = response_data.get('message_id', '') or response_data.get('consultation_id', '')
         response_type = response_data.get('response_type', '')
         faculty_id = response_data.get('faculty_id', '')
+        faculty_name = response_data.get('faculty_name', 'Unknown Faculty')
+        
+        logger.info(f"Processing consultation update - Topic: {topic}, Response Type: {response_type}, Message ID: {message_id}, Faculty ID: {faculty_id}")
         
         # Check if any of our consultations match this response
         consultation_found = False
-        for consultation in self.consultations:
-            consultation_id_str = str(consultation.id)
-            if (message_id == consultation_id_str or 
-                (consultation.faculty_id == faculty_id and consultation.status.value == 'pending')):
+        
+        # Handle different topic formats
+        if 'consultease/faculty/' in topic and '/responses' in topic:
+            # Extract faculty ID from topic: consultease/faculty/{id}/responses
+            try:
+                topic_parts = topic.split('/')
+                topic_faculty_id = int(topic_parts[2])  # consultease/faculty/{ID}/responses
                 
-                logger.info(f"Faculty response received for consultation {consultation.id}: {response_type}")
-                consultation_found = True
-                
-                # Show immediate notification
-                self.show_faculty_response_notification(response_type, consultation.faculty.name)
-                break
+                # Check if this matches any of our consultations
+                for consultation in self.consultations:
+                    consultation_id_str = str(consultation.id)
+                    consultation_faculty_id = getattr(consultation, 'faculty_id', None)
+                    
+                    # Match by message_id (consultation ID) or by faculty_id for pending consultations
+                    if (message_id == consultation_id_str or 
+                        (topic_faculty_id == consultation_faculty_id and consultation.status.value == 'pending')):
+                        
+                        logger.info(f"✅ Found matching consultation {consultation.id} for faculty response")
+                        consultation_found = True
+                        
+                        # Show immediate notification
+                        self.show_faculty_response_notification(response_type, faculty_name)
+                        break
+                        
+            except (IndexError, ValueError) as e:
+                logger.error(f"Error parsing faculty ID from topic {topic}: {e}")
+        
+        # Handle legacy professor/messages topic
+        elif topic == 'professor/messages':
+            # For professor/messages, we need to parse the message content
+            # This might contain consultation information
+            logger.info("Processing professor/messages topic")
+            consultation_found = True  # Assume it's relevant for now
+            
+            # Show a generic notification
+            self.show_faculty_response_notification('UPDATE', 'Faculty')
+        
+        # Handle other consultation topics
+        elif 'consultation' in topic or 'responses' in topic:
+            # Generic consultation update
+            consultation_found = True
+            self.show_faculty_response_notification(response_type or 'UPDATE', faculty_name)
         
         if consultation_found:
             # Schedule refresh after a short delay to allow database update
-            QTimer.singleShot(1000, self.refresh_consultations)  # Reduced delay for faster updates
+            QTimer.singleShot(2000, self.refresh_consultations)  # Increased delay to ensure DB is updated
+            logger.info(f"Scheduled consultation history refresh due to faculty response")
 
     def _handle_status_update(self, response_data, topic):
         """
@@ -1806,28 +1859,63 @@ class ConsultationPanel(QTabWidget):
             
         student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
         
-        # Extract message details
-        message_id = response_data.get('message_id', '')
+        # Extract message details from different possible formats
+        message_id = response_data.get('message_id', '') or response_data.get('consultation_id', '')
         response_type = response_data.get('response_type', '')
         faculty_id = response_data.get('faculty_id', '')
+        faculty_name = response_data.get('faculty_name', 'Unknown Faculty')
+        
+        logger.info(f"Processing consultation update - Topic: {topic}, Response Type: {response_type}, Message ID: {message_id}, Faculty ID: {faculty_id}")
         
         # Check if any of our consultations match this response
         consultation_found = False
-        for consultation in self.consultations:
-            consultation_id_str = str(consultation.id)
-            if (message_id == consultation_id_str or 
-                (consultation.faculty_id == faculty_id and consultation.status.value == 'pending')):
+        
+        # Handle different topic formats
+        if 'consultease/faculty/' in topic and '/responses' in topic:
+            # Extract faculty ID from topic: consultease/faculty/{id}/responses
+            try:
+                topic_parts = topic.split('/')
+                topic_faculty_id = int(topic_parts[2])  # consultease/faculty/{ID}/responses
                 
-                logger.info(f"Faculty response received for consultation {consultation.id}: {response_type}")
-                consultation_found = True
-                
-                # Show immediate notification
-                self.show_faculty_response_notification(response_type, consultation.faculty.name)
-                break
+                # Check if this matches any of our consultations
+                for consultation in self.consultations:
+                    consultation_id_str = str(consultation.id)
+                    consultation_faculty_id = getattr(consultation, 'faculty_id', None)
+                    
+                    # Match by message_id (consultation ID) or by faculty_id for pending consultations
+                    if (message_id == consultation_id_str or 
+                        (topic_faculty_id == consultation_faculty_id and consultation.status.value == 'pending')):
+                        
+                        logger.info(f"✅ Found matching consultation {consultation.id} for faculty response")
+                        consultation_found = True
+                        
+                        # Show immediate notification
+                        self.show_faculty_response_notification(response_type, faculty_name)
+                        break
+                        
+            except (IndexError, ValueError) as e:
+                logger.error(f"Error parsing faculty ID from topic {topic}: {e}")
+        
+        # Handle legacy professor/messages topic
+        elif topic == 'professor/messages':
+            # For professor/messages, we need to parse the message content
+            # This might contain consultation information
+            logger.info("Processing professor/messages topic")
+            consultation_found = True  # Assume it's relevant for now
+            
+            # Show a generic notification
+            self.show_faculty_response_notification('UPDATE', 'Faculty')
+        
+        # Handle other consultation topics
+        elif 'consultation' in topic or 'responses' in topic:
+            # Generic consultation update
+            consultation_found = True
+            self.show_faculty_response_notification(response_type or 'UPDATE', faculty_name)
         
         if consultation_found:
             # Schedule refresh after a short delay to allow database update
-            QTimer.singleShot(1000, self.refresh_consultations)  # Reduced delay for faster updates
+            QTimer.singleShot(2000, self.refresh_consultations)  # Increased delay to ensure DB is updated
+            logger.info(f"Scheduled consultation history refresh due to faculty response")
 
     def _handle_status_update(self, response_data, topic):
         """
