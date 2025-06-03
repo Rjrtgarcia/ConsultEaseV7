@@ -30,23 +30,12 @@ class PasswordChangeDialog(QDialog):
 
     def init_ui(self):
         """Initialize the password change dialog UI with improved styling and layout."""
-        self.setWindowTitle("Change Password - ConsultEase")
+        self.setWindowTitle("Change Password")
         self.setModal(True)
-        
-        # Responsive sizing based on screen size
-        from PyQt5.QtWidgets import QApplication
-        screen = QApplication.desktop().screenGeometry()
-        dialog_width = min(600, int(screen.width() * 0.4))
-        dialog_height = min(700, int(screen.height() * 0.7))
-        self.setFixedSize(dialog_width, dialog_height)
-        
-        # Center the dialog on screen
-        self.move(
-            (screen.width() - dialog_width) // 2,
-            (screen.height() - dialog_height) // 2
-        )
+        self.setMinimumSize(520, 650)  # Reduced from potentially larger size
+        self.setMaximumSize(600, 750)  # Set max size for better control
 
-        # Apply enhanced theme with better accessibility
+        # Apply enhanced dialog styling
         enhanced_dialog_stylesheet = """
             QDialog {
                 background-color: #f8f9fa;
@@ -60,11 +49,11 @@ class PasswordChangeDialog(QDialog):
             QLineEdit {
                 border: 2px solid #ced4da;
                 border-radius: 6px;
-                padding: 12px 16px;
-                font-size: 14pt;
+                padding: 10px 12px;  /* Reduced padding */
+                font-size: 13pt;  /* Slightly smaller font */
                 background-color: #ffffff;
                 color: #212529;
-                min-height: 20px;
+                min-height: 18px;  /* Reduced height */
             }
             QLineEdit:focus {
                 border-color: #0d6efd;
@@ -82,10 +71,10 @@ class PasswordChangeDialog(QDialog):
                 font-family: 'Segoe UI', Arial, sans-serif;
                 font-weight: 600;
                 border-radius: 6px;
-                padding: 12px 24px;
-                font-size: 14pt;
-                min-width: 120px;
-                min-height: 44px;
+                padding: 10px 20px;  /* Reduced padding */
+                font-size: 13pt;  /* Slightly smaller font */
+                min-width: 100px;  /* Reduced min width */
+                min-height: 38px;  /* Reduced height */
             }
             QPushButton:hover {
                 transform: translateY(-1px);
@@ -97,10 +86,10 @@ class PasswordChangeDialog(QDialog):
         """
         self.setStyleSheet(enhanced_dialog_stylesheet)
 
-        # Main layout with better spacing
+        # Main layout with optimized spacing
         layout = QVBoxLayout(self)
-        layout.setSpacing(25)
-        layout.setContentsMargins(40, 30, 40, 30)
+        layout.setSpacing(18)  # Reduced from 25
+        layout.setContentsMargins(30, 25, 30, 25)  # Reduced margins
 
         # Header
         self.create_header(layout)
@@ -108,7 +97,7 @@ class PasswordChangeDialog(QDialog):
         # Password form
         self.create_password_form(layout)
 
-        # Password requirements
+        # Password requirements (compact version)
         self.create_requirements_section(layout)
 
         # Password strength indicator
@@ -127,32 +116,33 @@ class PasswordChangeDialog(QDialog):
             QFrame {
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                                           stop: 0 #0d6efd, stop: 1 #0a58ca);
-                border-radius: 12px;
-                padding: 20px;
-                margin-bottom: 10px;
+                border-radius: 10px;
+                padding: 16px;  /* Reduced padding */
+                margin-bottom: 8px;  /* Reduced margin */
             }
         """)
         header_layout = QVBoxLayout(header_frame)
-        header_layout.setContentsMargins(20, 20, 20, 20)
+        header_layout.setContentsMargins(16, 16, 16, 16)  # Reduced margins
+        header_layout.setSpacing(8)  # Reduced spacing
 
         # Title with better typography
         title_label = QLabel("🔐 Change Password")
-        title_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))  # Slightly smaller
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: white; margin-bottom: 8px;")
+        title_label.setStyleSheet("color: white; margin-bottom: 6px;")
 
         # Subtitle based on forced change with improved styling
         if self.forced_change:
             subtitle_text = "⚠️ Your password has expired and must be changed before continuing."
             subtitle_color = "#fff3cd"
-            subtitle_bg = "background-color: rgba(255, 193, 7, 0.2); border-radius: 6px; padding: 8px;"
+            subtitle_bg = "background-color: rgba(255, 193, 7, 0.2); border-radius: 6px; padding: 6px;"
         else:
             subtitle_text = f"👤 Changing password for: {self.admin_info.get('username', 'Unknown')}"
             subtitle_color = "rgba(255, 255, 255, 0.9)"
             subtitle_bg = ""
 
         subtitle_label = QLabel(subtitle_text)
-        subtitle_label.setFont(QFont("Segoe UI", 12))
+        subtitle_label.setFont(QFont("Segoe UI", 11))  # Slightly smaller
         subtitle_label.setAlignment(Qt.AlignCenter)
         subtitle_label.setStyleSheet(f"color: {subtitle_color}; {subtitle_bg}")
         subtitle_label.setWordWrap(True)
@@ -169,18 +159,19 @@ class PasswordChangeDialog(QDialog):
             QFrame {
                 background-color: #ffffff;
                 border: 2px solid #e9ecef;
-                border-radius: 12px;
-                padding: 24px;
+                border-radius: 10px;
+                padding: 20px;  /* Reduced padding */
             }
         """)
         form_layout = QVBoxLayout(form_frame)
-        form_layout.setSpacing(20)
+        form_layout.setSpacing(16)  # Reduced spacing
 
         # Current password section
         current_section = QVBoxLayout()
+        current_section.setSpacing(6)  # Reduced spacing
         current_label = QLabel("🔑 Current Password:")
-        current_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        current_label.setStyleSheet("color: #495057; margin-bottom: 5px;")
+        current_label.setFont(QFont("Segoe UI", 11, QFont.Bold))  # Slightly smaller
+        current_label.setStyleSheet("color: #495057; margin-bottom: 3px;")
         
         self.current_password_input = QLineEdit()
         self.current_password_input.setEchoMode(QLineEdit.Password)
@@ -192,9 +183,10 @@ class PasswordChangeDialog(QDialog):
 
         # New password section
         new_section = QVBoxLayout()
+        new_section.setSpacing(6)  # Reduced spacing
         new_label = QLabel("🆕 New Password:")
-        new_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        new_label.setStyleSheet("color: #495057; margin-bottom: 5px;")
+        new_label.setFont(QFont("Segoe UI", 11, QFont.Bold))  # Slightly smaller
+        new_label.setStyleSheet("color: #495057; margin-bottom: 3px;")
         
         self.new_password_input = QLineEdit()
         self.new_password_input.setEchoMode(QLineEdit.Password)
@@ -207,9 +199,10 @@ class PasswordChangeDialog(QDialog):
 
         # Confirm password section
         confirm_section = QVBoxLayout()
+        confirm_section.setSpacing(6)  # Reduced spacing
         confirm_label = QLabel("✅ Confirm New Password:")
-        confirm_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        confirm_label.setStyleSheet("color: #495057; margin-bottom: 5px;")
+        confirm_label.setFont(QFont("Segoe UI", 11, QFont.Bold))  # Slightly smaller
+        confirm_label.setStyleSheet("color: #495057; margin-bottom: 3px;")
         
         self.confirm_password_input = QLineEdit()
         self.confirm_password_input.setEchoMode(QLineEdit.Password)
@@ -234,31 +227,38 @@ class PasswordChangeDialog(QDialog):
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                                           stop: 0 #fff8e1, stop: 1 #fffbf0);
                 border: 2px solid #ffd54f;
-                border-radius: 12px;
-                padding: 20px;
+                border-radius: 10px;
+                padding: 16px;  /* Reduced padding */
             }
         """)
         req_layout = QVBoxLayout(req_frame)
+        req_layout.setSpacing(6)  # Reduced spacing
 
         req_title = QLabel("📋 Password Requirements")
-        req_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        req_title.setStyleSheet("color: #f57f17; margin-bottom: 10px;")
+        req_title.setFont(QFont("Segoe UI", 11, QFont.Bold))  # Slightly smaller
+        req_title.setStyleSheet("color: #f57f17; margin-bottom: 8px;")
+        req_layout.addWidget(req_title)
 
+        # Create a more compact requirements list
         requirements_items = [
             "• At least 8 characters long",
             "• Contains uppercase letters (A-Z)",
             "• Contains lowercase letters (a-z)",
             "• Contains numbers (0-9)",
-            "• Contains special characters (!@#$%^&*)",
-            "• Does not rely heavily on common patterns"
+            "• Contains special characters (!@#$%^&*)"
         ]
 
-        for requirement in requirements_items:
+        # Use a horizontal layout for first three items to save space
+        row1_layout = QVBoxLayout()
+        row1_layout.setSpacing(2)
+        
+        for i, requirement in enumerate(requirements_items):
             req_item = QLabel(requirement)
-            req_item.setFont(QFont("Segoe UI", 11))
-            req_item.setStyleSheet("color: #f57f17; margin: 2px 0px; margin-left: 10px;")
-            req_layout.addWidget(req_item)
+            req_item.setFont(QFont("Segoe UI", 10))  # Smaller font
+            req_item.setStyleSheet("color: #f57f17; margin: 1px 0px; margin-left: 8px;")
+            row1_layout.addWidget(req_item)
 
+        req_layout.addLayout(row1_layout)
         layout.addWidget(req_frame)
 
     def create_strength_indicator(self, layout):
@@ -269,40 +269,41 @@ class PasswordChangeDialog(QDialog):
                 background-color: #f8f9fa;
                 border: 1px solid #dee2e6;
                 border-radius: 8px;
-                padding: 15px;
+                padding: 12px;  /* Reduced padding */
             }
         """)
         strength_layout = QVBoxLayout(strength_frame)
+        strength_layout.setSpacing(6)  # Reduced spacing
 
         strength_title = QLabel("💪 Password Strength:")
-        strength_title.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        strength_title.setFont(QFont("Segoe UI", 10, QFont.Bold))  # Smaller font
         strength_title.setStyleSheet("color: #495057;")
+        strength_layout.addWidget(strength_title)
 
-        # Create progress bar for strength
-        from PyQt5.QtWidgets import QProgressBar
+        # Progress bar for strength
         self.strength_progress = QProgressBar()
         self.strength_progress.setRange(0, 100)
         self.strength_progress.setValue(0)
-        self.strength_progress.setTextVisible(False)
-        self.strength_progress.setFixedHeight(8)
+        self.strength_progress.setMaximumHeight(8)  # Thinner progress bar
         self.strength_progress.setStyleSheet("""
             QProgressBar {
                 border: 1px solid #dee2e6;
                 border-radius: 4px;
                 background-color: #e9ecef;
+                text-align: center;
             }
             QProgressBar::chunk {
-                background-color: #28a745;
+                background-color: #dc3545;
                 border-radius: 3px;
             }
         """)
-
-        self.strength_label = QLabel("Enter a password to check strength")
-        self.strength_label.setFont(QFont("Segoe UI", 10))
-        self.strength_label.setStyleSheet("color: #6c757d; margin-top: 5px;")
-
-        strength_layout.addWidget(strength_title)
         strength_layout.addWidget(self.strength_progress)
+
+        # Strength label
+        self.strength_label = QLabel("Enter a password to check strength")
+        self.strength_label.setFont(QFont("Segoe UI", 9))  # Smaller font
+        self.strength_label.setStyleSheet("color: #6c757d;")
+        self.strength_label.setAlignment(Qt.AlignCenter)
         strength_layout.addWidget(self.strength_label)
 
         layout.addWidget(strength_frame)
@@ -310,7 +311,7 @@ class PasswordChangeDialog(QDialog):
     def create_buttons(self, layout):
         """Create dialog buttons with improved styling."""
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
+        button_layout.setSpacing(12)  # Reduced spacing
 
         # Cancel button (only if not forced change)
         if not self.forced_change:
@@ -352,7 +353,12 @@ class PasswordChangeDialog(QDialog):
         self.change_button.setEnabled(False)  # Initially disabled
         button_layout.addWidget(self.change_button)
 
-        layout.addLayout(button_layout)
+        # Add some top margin for the button section
+        button_container = QVBoxLayout()
+        button_container.setContentsMargins(0, 12, 0, 0)  # Top margin only
+        button_container.addLayout(button_layout)
+        
+        layout.addLayout(button_container)
 
     def validate_form(self):
         """Validate the form and enable/disable the change button."""
@@ -421,8 +427,17 @@ class PasswordChangeDialog(QDialog):
                     "Success",
                     "Password changed successfully!"
                 )
+                
+                # Clear the password fields for security
+                self.current_password_input.clear()
+                self.new_password_input.clear()
+                self.confirm_password_input.clear()
+                
+                # Emit success signal
                 self.password_changed.emit(True)
-                self.accept()
+                
+                # Ensure admin object refresh by adding a small delay
+                QTimer.singleShot(100, self.accept)
             else:
                 error_message = "\n".join(errors) if errors else "Password change failed."
                 QMessageBox.warning(self, "Error", error_message)
@@ -437,7 +452,7 @@ class PasswordChangeDialog(QDialog):
         finally:
             # Re-enable button
             self.change_button.setEnabled(True)
-            self.change_button.setText("Change Password")
+            self.change_button.setText("�� Change Password")
 
     def closeEvent(self, event):
         """Handle dialog close event."""

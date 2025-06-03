@@ -29,6 +29,7 @@ class AdminController:
         Returns:
             dict: Authentication result with admin object and status, None if failed
         """
+        db = None
         try:
             db = get_db()
             admin = db.query(Admin).filter(Admin.username == username, Admin.is_active == True).first()
@@ -38,22 +39,31 @@ class AdminController:
                 return None
 
             if admin.check_password(password):
+                # Refresh admin object to ensure we have the latest state
+                db.refresh(admin)
+                
                 logger.info(f"Admin authenticated: {username}")
                 self.current_admin = admin
 
                 # Log successful authentication
-                from ..utils.audit_logger import log_authentication
-                log_authentication(username, True, details="Admin login successful")
+                try:
+                    from ..utils.audit_logger import log_authentication
+                    log_authentication(username, True, details="Admin login successful")
+                except ImportError:
+                    logger.info("Audit logger not available, skipping audit log")
 
-                # Check if password change is required
-                if admin.needs_password_change():
-                    logger.warning(f"Admin {username} requires password change")
+                # Check if password change is required (use fresh state)
+                password_change_required = admin.needs_password_change()
+                
+                if password_change_required:
+                    logger.warning(f"Admin {username} requires password change - force_password_change: {admin.force_password_change}")
                     return {
                         'admin': admin,
                         'requires_password_change': True,
                         'message': 'Password change required. Please update your password.'
                     }
                 else:
+                    logger.info(f"Admin {username} login successful - no password change required")
                     return {
                         'admin': admin,
                         'requires_password_change': False,
@@ -62,12 +72,18 @@ class AdminController:
             else:
                 logger.warning(f"Invalid password for admin: {username}")
                 # Log failed authentication
-                from ..utils.audit_logger import log_authentication
-                log_authentication(username, False, details="Invalid password")
+                try:
+                    from ..utils.audit_logger import log_authentication
+                    log_authentication(username, False, details="Invalid password")
+                except ImportError:
+                    logger.info("Audit logger not available, skipping audit log")
                 return None
         except Exception as e:
             logger.error(f"Error authenticating admin: {str(e)}")
             return None
+        finally:
+            if db:
+                db.close()
 
     def check_admin_accounts_exist(self, force_refresh=False):
         """
@@ -149,7 +165,7 @@ class AdminController:
                     'error': 'Username already exists'
                 }
 
-            # Validate password strength
+            # Validate password
             is_valid, error_message = Admin.validate_password_strength(password)
             if not is_valid:
                 logger.warning(f"Password validation failed for new admin {username}: {error_message}")
@@ -283,6 +299,7 @@ class AdminController:
         Returns:
             tuple: (bool success, list of validation errors)
         """
+        db = None
         try:
             # Validate new password
             is_valid, validation_errors = validate_password(new_password)
@@ -306,17 +323,37 @@ class AdminController:
 
             # Update password using the admin model method
             if admin.update_password(new_password):
+                # Explicitly commit the transaction
                 db.commit()
+                
+                # Refresh the admin object from database to ensure state is current
+                db.refresh(admin)
+                
+                # Verify that force_password_change was properly cleared
+                if admin.force_password_change:
+                    logger.warning(f"Force password change flag not cleared for admin {admin.username}, manually clearing")
+                    admin.force_password_change = False
+                    db.commit()
+                    db.refresh(admin)
+                
+                # Update current_admin if this is the currently logged in admin
+                if self.current_admin and self.current_admin.id == admin_id:
+                    self.current_admin = admin
+                    logger.info(f"Updated current admin object for {admin.username}")
+                
                 logger.info(f"Changed password for admin: {admin.username}")
 
                 # Log password change
-                from ..utils.audit_logger import get_audit_logger
-                audit_logger = get_audit_logger()
-                audit_logger.log_password_change(
-                    admin.id,
-                    admin.username,
-                    forced=admin.force_password_change
-                )
+                try:
+                    from ..utils.audit_logger import get_audit_logger
+                    audit_logger = get_audit_logger()
+                    audit_logger.log_password_change(
+                        admin.id,
+                        admin.username,
+                        forced=False  # Since password was just changed, it's no longer forced
+                    )
+                except ImportError:
+                    logger.info("Audit logger not available, skipping audit log")
 
                 return True, []
             else:
@@ -324,7 +361,12 @@ class AdminController:
         except Exception as e:
             error_msg = f"Error changing admin password: {str(e)}"
             logger.error(error_msg)
+            if db:
+                db.rollback()
             return False, [error_msg]
+        finally:
+            if db:
+                db.close()
 
     def change_username(self, admin_id, password, new_username):
         """

@@ -123,6 +123,7 @@ class Admin(Base):
             self.last_password_change = datetime.now()
 
             logger.info(f"Password updated for admin: {self.username}")
+            logger.info(f"Force password change flag cleared for admin: {self.username}")
             return True
 
         except Exception as e:
