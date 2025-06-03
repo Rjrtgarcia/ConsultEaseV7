@@ -778,12 +778,10 @@ class ConsultationHistoryPanel(QFrame):
                 QPushButton:hover {
                     background-color: #1E90FF;
                     border: 2px solid #FFD700;
-                    transform: scale(1.02);
                 }
                 QPushButton:pressed {
                     background-color: #0066CC;
                     border: 2px solid #B8860B;
-                    transform: scale(0.98);
                 }
             """)
             # Use a better lambda that ignores the checked parameter
@@ -808,13 +806,11 @@ class ConsultationHistoryPanel(QFrame):
                         background-color: #FFD700;
                         border: 2px solid #1E90FF;
                         color: #333333;
-                        transform: scale(1.02);
                     }
                     QPushButton:pressed {
                         background-color: #B8860B;
                         border: 2px solid #0066CC;
                         color: white;
-                        transform: scale(0.98);
                     }
                 """)
                 # Use a better lambda that ignores the checked parameter
@@ -1137,11 +1133,9 @@ class ConsultationDetailsDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #1E90FF;
-                transform: scale(1.02);
             }
             QPushButton:pressed {
                 background-color: #0066CC;
-                transform: scale(0.98);
             }
         ''')
 

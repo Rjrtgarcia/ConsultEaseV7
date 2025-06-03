@@ -229,7 +229,7 @@ class DashboardWindow(BaseWindow):
         
         # Set up additional initialization after UI is created
         # Set up real-time consultation status updates after parent initialization
-        self.setup_real_time_updates()
+        self.setup_realtime_updates()
 
         # Set up smart refresh manager for optimized faculty status updates
         self.refresh_timer = QTimer(self)
@@ -334,11 +334,9 @@ class DashboardWindow(BaseWindow):
             }
             QPushButton:hover {
                 background-color: #c0392b;
-                transform: scale(1.02);
             }
             QPushButton:pressed {
                 background-color: #a82315;
-                transform: scale(0.98);
             }
         """)
         logout_button.clicked.connect(self.logout)
