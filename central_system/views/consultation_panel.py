@@ -866,52 +866,14 @@ class ConsultationHistoryPanel(QFrame):
 
     def setup_mqtt_monitoring(self):
         """
-        Set up MQTT monitoring for faculty responses from desk units with improved reliability.
+        Set up MQTT monitoring for faculty responses using the centralized async MQTT service.
         """
         try:
-            import paho.mqtt.client as mqtt
+            # Use the centralized async MQTT service instead of creating a separate client
+            from ..services.async_mqtt_service import get_async_mqtt_service
+            from ..utils.mqtt_utils import subscribe_to_topic
             
-            # Initialize MQTT connection variables FIRST, before attempting connection
-            self._mqtt_connected = False
-            self._mqtt_retry_count = 0
-            self._max_retries = 5
-            
-            # Create MQTT client with improved configuration
-            self.mqtt_client = mqtt.Client()
-            self.mqtt_client.on_connect = self.on_mqtt_connect
-            self.mqtt_client.on_message = self.on_mqtt_message
-            self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
-            
-            # Set keep alive and reconnection settings
-            self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
-            
-            # Connect to MQTT broker with retry logic
-            mqtt_server = "192.168.100.3"  # Same as FDU configuration
-            mqtt_port = 1883
-            
-            try:
-                self.mqtt_client.connect(mqtt_server, mqtt_port, 60)
-                self.mqtt_client.loop_start()
-                logger.info("MQTT monitoring started for consultation updates")
-                
-            except Exception as e:
-                logger.warning(f"Could not connect to MQTT broker: {e}")
-                self._schedule_mqtt_reconnect()
-                
-        except ImportError:
-            logger.warning("paho-mqtt not available, MQTT monitoring disabled")
-            self.mqtt_client = None
-
-    def on_mqtt_connect(self, client, userdata, flags, rc):
-        """
-        Callback for MQTT connection with improved subscription handling.
-        """
-        if rc == 0:
-            logger.info("Connected to MQTT broker for consultation monitoring")
-            self._mqtt_connected = True
-            self._mqtt_retry_count = 0
-            
-            # Subscribe to faculty response topics with multiple patterns for reliability
+            # Subscribe to faculty response topics using the centralized service
             topics = [
                 "consultease/faculty/+/responses",
                 "faculty/+/responses",  # Legacy compatibility
@@ -920,65 +882,56 @@ class ConsultationHistoryPanel(QFrame):
             ]
             
             for topic in topics:
-                client.subscribe(topic)
-                logger.debug(f"Subscribed to MQTT topic: {topic}")
-        else:
-            logger.error(f"Failed to connect to MQTT broker: {rc}")
-            self._mqtt_connected = False
-            self._schedule_mqtt_reconnect()
-
-    def on_mqtt_disconnect(self, client, userdata, rc):
-        """
-        Callback for MQTT disconnection with automatic reconnection.
-        """
-        logger.warning(f"Disconnected from MQTT broker: {rc}")
-        self._mqtt_connected = False
-        if rc != 0:  # Unexpected disconnection
-            self._schedule_mqtt_reconnect()
-
-    def _schedule_mqtt_reconnect(self):
-        """
-        Schedule MQTT reconnection with exponential backoff.
-        """
-        if self._mqtt_retry_count < self._max_retries:
-            delay = min(1000 * (2 ** self._mqtt_retry_count), 30000)  # Max 30 seconds
-            self._mqtt_retry_count += 1
-            
-            logger.info(f"Scheduling MQTT reconnection attempt {self._mqtt_retry_count} in {delay/1000} seconds")
-            QTimer.singleShot(delay, self._attempt_mqtt_reconnect)
-        else:
-            logger.error("Max MQTT reconnection attempts reached")
-
-    def _attempt_mqtt_reconnect(self):
-        """
-        Attempt to reconnect to MQTT broker.
-        """
-        try:
-            if self.mqtt_client and not self._mqtt_connected:
-                self.mqtt_client.reconnect()
-                logger.info("MQTT reconnection attempt initiated")
+                try:
+                    subscribe_to_topic(topic, self._handle_mqtt_message_safe)
+                    logger.debug(f"Subscribed to MQTT topic: {topic}")
+                except Exception as e:
+                    logger.error(f"Failed to subscribe to topic {topic}: {e}")
+                    
+            logger.info("MQTT monitoring started for consultation updates using centralized service")
+                
         except Exception as e:
-            logger.error(f"MQTT reconnection failed: {e}")
-            self._schedule_mqtt_reconnect()
+            logger.error(f"Failed to setup MQTT monitoring: {e}")
 
-    def on_mqtt_message(self, client, userdata, msg):
+    def _handle_mqtt_message_safe(self, topic: str, data):
         """
-        Handle MQTT messages from faculty desk units with improved processing.
+        Thread-safe MQTT message handler that schedules GUI updates in the main thread.
+        
+        Args:
+            topic: MQTT topic
+            data: Message data
+        """
+        # Schedule the GUI update in the main thread using QTimer.singleShot
+        # This prevents Qt threading violations
+        QTimer.singleShot(0, lambda: self._process_mqtt_message(topic, data))
+
+    def _process_mqtt_message(self, topic: str, data):
+        """
+        Process MQTT messages in the main thread.
+        
+        Args:
+            topic: MQTT topic
+            data: Message data
         """
         try:
             import json
             
             # Parse the message
-            message_str = msg.payload.decode('utf-8')
-            topic = msg.topic
+            if isinstance(data, str):
+                message_str = data
+                try:
+                    response_data = json.loads(message_str)
+                except json.JSONDecodeError:
+                    # Handle non-JSON messages
+                    response_data = {'raw_message': message_str, 'topic': topic}
+            elif isinstance(data, dict):
+                response_data = data
+                message_str = json.dumps(data) if data else str(data)
+            else:
+                response_data = {'raw_message': str(data), 'topic': topic}
+                message_str = str(data)
+                
             logger.info(f"Received MQTT message on {topic}: {message_str}")
-            
-            # Parse JSON response if applicable
-            try:
-                response_data = json.loads(message_str)
-            except json.JSONDecodeError:
-                # Handle non-JSON messages (e.g., simple status updates)
-                response_data = {'raw_message': message_str, 'topic': topic}
             
             # Process different types of updates
             if 'consultation' in topic.lower() or 'responses' in topic.lower():
@@ -991,7 +944,7 @@ class ConsultationHistoryPanel(QFrame):
 
     def _handle_consultation_update(self, response_data, topic):
         """
-        Handle consultation-specific MQTT updates.
+        Handle consultation-specific MQTT updates in the main thread.
         """
         if not self.student:
             return
@@ -1023,7 +976,7 @@ class ConsultationHistoryPanel(QFrame):
 
     def _handle_status_update(self, response_data, topic):
         """
-        Handle general status updates (faculty availability, etc.).
+        Handle general status updates (faculty availability, etc.) in the main thread.
         """
         logger.debug(f"Processing status update: {response_data}")
         # Trigger a consultation refresh in case status affects pending consultations
@@ -1066,14 +1019,11 @@ class ConsultationHistoryPanel(QFrame):
 
     def __del__(self):
         """
-        Cleanup MQTT connection when object is destroyed.
+        Cleanup when object is destroyed.
+        The MQTT cleanup is now handled by the centralized async MQTT service.
         """
-        if self.mqtt_client:
-            try:
-                self.mqtt_client.loop_stop()
-                self.mqtt_client.disconnect()
-            except:
-                pass
+        # No need to cleanup MQTT connection as it's handled by the centralized service
+        pass
 
 class ConsultationDetailsDialog(QDialog):
     """
@@ -1811,3 +1761,113 @@ class ConsultationPanel(QTabWidget):
         elif not hasattr(self.history_panel, 'mqtt_client') or not self.history_panel.mqtt_client:
             # Try to establish MQTT connection if not present
             self.history_panel.setup_mqtt_monitoring()
+
+    def on_mqtt_connect(self, client, userdata, flags, rc):
+        """
+        Callback for MQTT connection - DEPRECATED.
+        Now handled by the centralized async MQTT service.
+        """
+        pass
+
+    def on_mqtt_disconnect(self, client, userdata, rc):
+        """
+        Callback for MQTT disconnection - DEPRECATED.
+        Now handled by the centralized async MQTT service.
+        """
+        pass
+
+    def _schedule_mqtt_reconnect(self):
+        """
+        Schedule MQTT reconnection - DEPRECATED.
+        Now handled by the centralized async MQTT service.
+        """
+        pass
+
+    def _attempt_mqtt_reconnect(self):
+        """
+        Attempt to reconnect to MQTT broker - DEPRECATED.
+        Now handled by the centralized async MQTT service.
+        """
+        pass
+
+    def on_mqtt_message(self, client, userdata, msg):
+        """
+        Handle MQTT messages - DEPRECATED.
+        Now using the centralized async MQTT service.
+        """
+        pass
+
+    def _handle_consultation_update(self, response_data, topic):
+        """
+        Handle consultation-specific MQTT updates in the main thread.
+        """
+        if not self.student:
+            return
+            
+        student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
+        
+        # Extract message details
+        message_id = response_data.get('message_id', '')
+        response_type = response_data.get('response_type', '')
+        faculty_id = response_data.get('faculty_id', '')
+        
+        # Check if any of our consultations match this response
+        consultation_found = False
+        for consultation in self.consultations:
+            consultation_id_str = str(consultation.id)
+            if (message_id == consultation_id_str or 
+                (consultation.faculty_id == faculty_id and consultation.status.value == 'pending')):
+                
+                logger.info(f"Faculty response received for consultation {consultation.id}: {response_type}")
+                consultation_found = True
+                
+                # Show immediate notification
+                self.show_faculty_response_notification(response_type, consultation.faculty.name)
+                break
+        
+        if consultation_found:
+            # Schedule refresh after a short delay to allow database update
+            QTimer.singleShot(1000, self.refresh_consultations)  # Reduced delay for faster updates
+
+    def _handle_status_update(self, response_data, topic):
+        """
+        Handle general status updates (faculty availability, etc.) in the main thread.
+        """
+        logger.debug(f"Processing status update: {response_data}")
+        # Trigger a consultation refresh in case status affects pending consultations
+        QTimer.singleShot(500, self.refresh_consultations)
+
+    def show_faculty_response_notification(self, response_type, faculty_name):
+        """
+        Show notification when faculty responds via desk unit.
+        """
+        try:
+            from ..utils.notification import NotificationManager
+            
+            if response_type.upper() in ['ACKNOWLEDGE', 'ACCEPTED']:
+                title = "Consultation Accepted! ✅"
+                message = f"{faculty_name} has accepted your consultation request."
+                notification_type = NotificationManager.SUCCESS
+            elif response_type.upper() in ['BUSY', 'UNAVAILABLE']:
+                title = "Faculty Busy ⏳"
+                message = f"{faculty_name} is currently busy and cannot take your consultation."
+                notification_type = NotificationManager.WARNING
+            else:
+                title = "Consultation Update 📬"
+                message = f"{faculty_name} has responded to your consultation request."
+                notification_type = NotificationManager.INFO
+                
+            NotificationManager.show_message(
+                self,
+                title,
+                message,
+                notification_type
+            )
+            
+        except ImportError:
+            # Fallback to basic message box
+            QMessageBox.information(
+                self,
+                "Faculty Response",
+                f"{faculty_name} has responded to your consultation request. Please refresh to see the update."
+            )

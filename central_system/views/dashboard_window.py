@@ -1594,17 +1594,23 @@ class DashboardWindow(BaseWindow):
         Set up real-time MQTT subscription for faculty status updates with improved reliability.
         """
         try:
-            from ..services import get_async_mqtt_service
+            from ..utils.mqtt_utils import subscribe_to_topic
             
-            mqtt_service = get_async_mqtt_service()
-            if mqtt_service:
-                # Subscribe to faculty status updates
-                mqtt_service.subscribe("faculty/+/status", self.handle_realtime_status_update)
-                mqtt_service.subscribe("faculty/+/availability", self.handle_realtime_status_update)
-                mqtt_service.subscribe("consultation/+/status", self.handle_realtime_status_update)
-                logger.info("Set up real-time faculty status subscriptions")
-            else:
-                logger.warning("MQTT service not available for real-time updates")
+            # Subscribe to faculty status updates using the centralized utils
+            topics = [
+                "faculty/+/status",
+                "faculty/+/availability", 
+                "consultation/+/status"
+            ]
+            
+            for topic in topics:
+                try:
+                    subscribe_to_topic(topic, self.handle_realtime_status_update)
+                    logger.debug(f"Subscribed to topic: {topic}")
+                except Exception as e:
+                    logger.error(f"Failed to subscribe to topic {topic}: {e}")
+                    
+            logger.info("Set up real-time faculty status subscriptions")
         except Exception as e:
             logger.error(f"Error setting up real-time updates: {e}")
 
@@ -1613,20 +1619,38 @@ class DashboardWindow(BaseWindow):
         Clean up real-time MQTT subscriptions.
         """
         try:
-            from ..services import get_async_mqtt_service
+            from ..services.async_mqtt_service import get_async_mqtt_service
             
             mqtt_service = get_async_mqtt_service()
             if mqtt_service:
-                mqtt_service.unsubscribe("faculty/+/status")
-                mqtt_service.unsubscribe("faculty/+/availability") 
-                mqtt_service.unsubscribe("consultation/+/status")
+                # Unsubscribe from topics
+                topics = [
+                    "faculty/+/status",
+                    "faculty/+/availability", 
+                    "consultation/+/status"
+                ]
+                
+                for topic in topics:
+                    try:
+                        mqtt_service.unregister_topic_handler(topic)
+                        logger.debug(f"Unsubscribed from topic: {topic}")
+                    except Exception as e:
+                        logger.error(f"Failed to unsubscribe from topic {topic}: {e}")
+                        
                 logger.info("Cleaned up real-time subscriptions")
         except Exception as e:
             logger.error(f"Error cleaning up real-time updates: {e}")
 
     def handle_realtime_status_update(self, topic, data):
         """
-        Handle real-time status updates from MQTT with improved processing.
+        Handle real-time status updates from MQTT with thread-safe GUI updates.
+        """
+        # Schedule the actual processing in the main thread to prevent Qt threading violations
+        QTimer.singleShot(0, lambda: self._process_realtime_status_update(topic, data))
+
+    def _process_realtime_status_update(self, topic, data):
+        """
+        Process real-time status updates in the main thread.
         """
         try:
             logger.debug(f"Received real-time update: {topic} -> {data}")
