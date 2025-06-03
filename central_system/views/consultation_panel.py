@@ -38,32 +38,32 @@ class ConsultationRequestForm(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("consultation_request_form")
 
-        # Apply theme-based stylesheet with further improved readability
+        # Apply theme-based stylesheet with gold and blue theme
         self.setStyleSheet('''
             QFrame#consultation_request_form {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
+                background-color: #ffffff;
+                border: 2px solid #DAA520;
                 border-radius: 10px;
                 padding: 20px;
             }
             QLabel {
                 font-size: 16pt;
-                color: #212529;
+                color: #1E90FF;
                 font-weight: 500;
                 margin-bottom: 5px;
             }
             QLineEdit, QTextEdit, QComboBox {
-                border: 2px solid #4dabf7;
+                border: 2px solid #4169E1;
                 border-radius: 5px;
                 padding: 15px;
-                background-color: white;
+                background-color: #ffffff;
                 font-size: 16pt;
-                color: #212529;
+                color: #333333;
                 margin: 5px 0;
             }
             QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
-                border: 2px solid #228be6;
-                background-color: #f1f3f5;
+                border: 2px solid #FFD700;
+                background-color: #FFFEF7;
             }
             QPushButton {
                 border-radius: 5px;
@@ -84,38 +84,40 @@ class ConsultationRequestForm(QFrame):
 
         # Form title
         title_label = QLabel("Request Consultation")
-        title_label.setStyleSheet("font-size: 20pt; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 20pt; font-weight: bold; color: #DAA520;")
         main_layout.addWidget(title_label)
 
         # Faculty selection
         faculty_layout = QHBoxLayout()
         faculty_label = QLabel("Faculty:")
         faculty_label.setFixedWidth(120)
-        faculty_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #2c3e50;")
+        faculty_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #1E90FF;")
         self.faculty_combo = QComboBox()
         self.faculty_combo.setMinimumWidth(300)
         self.faculty_combo.setStyleSheet("""
             QComboBox {
-                border: 2px solid #3498db;
+                border: 2px solid #4169E1;
                 border-radius: 5px;
                 padding: 10px;
-                background-color: white;
+                background-color: #ffffff;
                 font-size: 12pt;
+                color: #333333;
             }
             QComboBox:focus {
-                border: 2px solid #2980b9;
+                border: 2px solid #FFD700;
+                background-color: #FFFEF7;
             }
             QComboBox::drop-down {
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 30px;
-                border-left: 1px solid #3498db;
+                border-left: 1px solid #4169E1;
             }
             QComboBox QAbstractItemView {
-                border: 2px solid #3498db;
-                selection-background-color: #3498db;
-                selection-color: white;
-                background-color: white;
+                border: 2px solid #4169E1;
+                selection-background-color: #FFD700;
+                selection-color: #333333;
+                background-color: #ffffff;
                 font-size: 12pt;
             }
         """)
@@ -127,19 +129,21 @@ class ConsultationRequestForm(QFrame):
         course_layout = QHBoxLayout()
         course_label = QLabel("Course Code:")
         course_label.setFixedWidth(120)
-        course_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #2c3e50;")
+        course_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #1E90FF;")
         self.course_input = QLineEdit()
         self.course_input.setPlaceholderText("e.g., CS101 (optional)")
         self.course_input.setStyleSheet("""
             QLineEdit {
-                border: 2px solid #3498db;
+                border: 2px solid #4169E1;
                 border-radius: 5px;
                 padding: 10px;
-                background-color: white;
+                background-color: #ffffff;
                 font-size: 12pt;
+                color: #333333;
             }
             QLineEdit:focus {
-                border: 2px solid #2980b9;
+                border: 2px solid #FFD700;
+                background-color: #FFFEF7;
             }
         """)
         course_layout.addWidget(course_label)
@@ -149,19 +153,21 @@ class ConsultationRequestForm(QFrame):
         # Message input
         message_layout = QVBoxLayout()
         message_label = QLabel("Consultation Details:")
-        message_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #2c3e50;")
+        message_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #1E90FF;")
         self.message_input = QTextEdit()
         self.message_input.setPlaceholderText("Describe what you'd like to discuss...")
         self.message_input.setStyleSheet("""
             QTextEdit {
-                border: 2px solid #3498db;
+                border: 2px solid #4169E1;
                 border-radius: 5px;
                 padding: 10px;
-                background-color: white;
+                background-color: #ffffff;
                 font-size: 12pt;
+                color: #333333;
             }
             QTextEdit:focus {
-                border: 2px solid #2980b9;
+                border: 2px solid #FFD700;
+                background-color: #FFFEF7;
             }
         """)
         self.message_input.setMinimumHeight(150)
@@ -181,11 +187,11 @@ class ConsultationRequestForm(QFrame):
 
         self.char_count_label = QLabel("0/500 characters")
         self.char_count_label.setAlignment(Qt.AlignLeft)
-        self.char_count_label.setStyleSheet("color: #2c3e50; font-size: 11pt; font-weight: bold;")
+        self.char_count_label.setStyleSheet("color: #1E90FF; font-size: 11pt; font-weight: bold;")
 
         # Add a small info label about the limit
         char_limit_info = QLabel("(500 character limit)")
-        char_limit_info.setStyleSheet("color: #2c3e50; font-size: 10pt; font-weight: bold;")
+        char_limit_info.setStyleSheet("color: #DAA520; font-size: 10pt; font-weight: bold;")
         char_limit_info.setAlignment(Qt.AlignRight)
 
         count_indicator_layout.addWidget(self.char_count_label)
@@ -203,11 +209,11 @@ class ConsultationRequestForm(QFrame):
         self.char_count_progress.setStyleSheet("""
             QProgressBar {
                 background-color: #f0f0f0;
-                border: 1px solid #cccccc;
+                border: 1px solid #DAA520;
                 border-radius: 5px;
             }
             QProgressBar::chunk {
-                background-color: #3498db;
+                background-color: #4169E1;
                 border-radius: 5px;
             }
         """)
@@ -224,7 +230,7 @@ class ConsultationRequestForm(QFrame):
         cancel_button = QPushButton("Cancel")
         cancel_button.setStyleSheet('''
             QPushButton {
-                background-color: #e74c3c;
+                background-color: #DAA520;
                 min-width: 120px;
             }
         ''')
@@ -233,7 +239,7 @@ class ConsultationRequestForm(QFrame):
         submit_button = QPushButton("Submit Request")
         submit_button.setStyleSheet('''
             QPushButton {
-                background-color: #2ecc71;
+                background-color: #4169E1;
                 min-width: 120px;
             }
         ''')
@@ -250,15 +256,15 @@ class ConsultationRequestForm(QFrame):
         Update the character count label and progress bar.
         """
         count = len(self.message_input.toPlainText())
-        color = "#2c3e50"  # Default dark blue
-        progress_color = "#3498db"  # Default blue
+        color = "#1E90FF"  # Default blue
+        progress_color = "#4169E1"  # Default blue
 
         if count > 400:
-            color = "#f39c12"  # Warning yellow
-            progress_color = "#f39c12"
+            color = "#DAA520"  # Warning gold
+            progress_color = "#DAA520"
         if count > 500:
-            color = "#e74c3c"  # Error red
-            progress_color = "#e74c3c"
+            color = "#FF6347"  # Error red-orange
+            progress_color = "#FF6347"
 
         self.char_count_label.setText(f"{count}/500 characters")
         self.char_count_label.setStyleSheet(f"color: {color}; font-size: 11pt; font-weight: bold;")
@@ -268,7 +274,7 @@ class ConsultationRequestForm(QFrame):
         self.char_count_progress.setStyleSheet(f"""
             QProgressBar {{
                 background-color: #f0f0f0;
-                border: 1px solid #cccccc;
+                border: 1px solid #DAA520;
                 border-radius: 5px;
             }}
             QProgressBar::chunk {{
@@ -471,29 +477,29 @@ class ConsultationHistoryPanel(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("consultation_history_panel")
 
-        # Apply theme-based stylesheet with further improved readability
+        # Apply theme-based stylesheet with gold and blue theme
         self.setStyleSheet('''
             QFrame#consultation_history_panel {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
+                background-color: #ffffff;
+                border: 2px solid #DAA520;
                 border-radius: 10px;
                 padding: 20px;
             }
             QTableWidget {
-                border: 1px solid #dee2e6;
+                border: 2px solid #4169E1;
                 border-radius: 5px;
-                background-color: white;
-                alternate-background-color: #f1f3f5;
-                gridline-color: #dee2e6;
+                background-color: #ffffff;
+                alternate-background-color: #FAFAFA;
+                gridline-color: #DAA520;
                 font-size: 16pt;
-                color: #212529;
+                color: #333333;
             }
             QTableWidget::item {
                 padding: 12px;
-                border-bottom: 1px solid #e9ecef;
+                border-bottom: 1px solid #DAA520;
             }
             QHeaderView::section {
-                background-color: #228be6;
+                background-color: #4169E1;
                 color: white;
                 padding: 15px;
                 border: none;
@@ -508,17 +514,17 @@ class ConsultationHistoryPanel(QFrame):
             }
             /* Improve scrollbar visibility */
             QScrollBar:vertical {
-                background: #f1f3f5;
+                background: #FAFAFA;
                 width: 15px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background: #adb5bd;
+                background: #DAA520;
                 min-height: 30px;
                 border-radius: 7px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #868e96;
+                background: #B8860B;
             }
             QPushButton {
                 border-radius: 5px;
@@ -538,7 +544,7 @@ class ConsultationHistoryPanel(QFrame):
 
         # Title
         title_label = QLabel("My Consultation History")
-        title_label.setStyleSheet("font-size: 20pt; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 20pt; font-weight: bold; color: #DAA520;")
         main_layout.addWidget(title_label)
 
         # Consultation table
@@ -573,7 +579,7 @@ class ConsultationHistoryPanel(QFrame):
         refresh_button = QPushButton("Refresh")
         refresh_button.setStyleSheet('''
             QPushButton {
-                background-color: #3498db;
+                background-color: #4169E1;
                 min-width: 120px;
             }
         ''')
@@ -693,32 +699,32 @@ class ConsultationHistoryPanel(QFrame):
             # Status with enhanced color coding and improved contrast
             status_item = QTableWidgetItem(consultation.status.value.capitalize())
 
-            # Define status colors with better contrast and accessibility
+            # Define status colors with gold and blue theme
             status_colors = {
                 "pending": {
-                    "bg": QColor(255, 193, 7),    # Amber (darker yellow)
-                    "fg": QColor(0, 0, 0),        # Black text for contrast
-                    "border": "#f08c00"           # Darker border for definition
+                    "bg": QColor(255, 248, 220),  # Light goldenrod background
+                    "fg": QColor(184, 134, 11),   # Dark goldenrod text
+                    "border": "#DAA520"           # Goldenrod border
                 },
                 "accepted": {
-                    "bg": QColor(40, 167, 69),    # Enhanced green
-                    "fg": QColor(255, 255, 255),  # White text for contrast
-                    "border": "#2b8a3e"           # Darker border for definition
+                    "bg": QColor(240, 248, 255),  # Very light blue background
+                    "fg": QColor(34, 139, 34),    # Forest green text
+                    "border": "#228B22"           # Green border for accepted
                 },
                 "busy": {
-                    "bg": QColor(255, 152, 0),    # Orange for busy status
-                    "fg": QColor(255, 255, 255),  # White text for contrast
-                    "border": "#e65100"           # Darker orange border
+                    "bg": QColor(255, 245, 245),  # Very light red background  
+                    "fg": QColor(220, 53, 69),    # Red text
+                    "border": "#dc3545"           # Red border
                 },
                 "completed": {
-                    "bg": QColor(0, 123, 255),    # Enhanced blue
-                    "fg": QColor(255, 255, 255),  # White text for contrast
-                    "border": "#1864ab"           # Darker border for definition
+                    "bg": QColor(230, 240, 255),  # Light blue background
+                    "fg": QColor(65, 105, 225),   # Royal blue text
+                    "border": "#4169E1"           # Royal blue border
                 },
                 "cancelled": {
-                    "bg": QColor(220, 53, 69),    # Enhanced red
-                    "fg": QColor(255, 255, 255),  # White text for contrast
-                    "border": "#a61e4d"           # Darker border for definition
+                    "bg": QColor(255, 245, 245),  # Light red background
+                    "fg": QColor(178, 134, 11),   # Dark goldenrod text
+                    "border": "#B8860B"           # Dark goldenrod border
                 }
             }
 
@@ -761,7 +767,7 @@ class ConsultationHistoryPanel(QFrame):
             view_button.setFixedSize(70, 40)  # Slightly larger for better touch interaction
             view_button.setStyleSheet("""
                 QPushButton {
-                    background-color: #3498db; 
+                    background-color: #4169E1; 
                     color: white;
                     border: none;
                     border-radius: 6px;
@@ -770,11 +776,11 @@ class ConsultationHistoryPanel(QFrame):
                     padding: 8px 12px;
                 }
                 QPushButton:hover {
-                    background-color: #2980b9;
+                    background-color: #1E90FF;
                     transform: scale(1.02);
                 }
                 QPushButton:pressed {
-                    background-color: #21618c;
+                    background-color: #0066CC;
                     transform: scale(0.98);
                 }
             """)
@@ -788,7 +794,7 @@ class ConsultationHistoryPanel(QFrame):
                 cancel_button.setFixedSize(80, 40)  # Slightly larger for better touch interaction
                 cancel_button.setStyleSheet("""
                     QPushButton {
-                        background-color: #e74c3c; 
+                        background-color: #DAA520; 
                         color: white;
                         border: none;
                         border-radius: 6px;
@@ -797,11 +803,11 @@ class ConsultationHistoryPanel(QFrame):
                         padding: 8px 12px;
                     }
                     QPushButton:hover {
-                        background-color: #c0392b;
+                        background-color: #B8860B;
                         transform: scale(1.02);
                     }
                     QPushButton:pressed {
-                        background-color: #a93226;
+                        background-color: #996515;
                         transform: scale(0.98);
                     }
                 """)
@@ -879,28 +885,28 @@ class ConsultationDetailsDialog(QDialog):
         self.setMinimumHeight(600)  # Slightly taller for better spacing
         self.setObjectName("consultation_details_dialog")
 
-        # Apply theme-based stylesheet with improved readability and better spacing
+        # Apply theme-based stylesheet with gold and blue theme
         self.setStyleSheet('''
             QDialog#consultation_details_dialog {
-                background-color: #f8f9fa;
+                background-color: #ffffff;
                 padding: 15px;
             }
             QLabel {
                 font-size: 16pt;
-                color: #212529;
+                color: #333333;
                 padding: 5px 0;
             }
             QLabel[heading="true"] {
                 font-size: 22pt;
                 font-weight: bold;
-                color: #228be6;
+                color: #4169E1;
                 margin-bottom: 15px;
                 padding: 10px 0;
             }
             QFrame {
-                border: 1px solid #dee2e6;
+                border: 2px solid #DAA520;
                 border-radius: 10px;
-                background-color: white;
+                background-color: #ffffff;
                 padding: 25px;
                 margin: 10px 0;
             }
@@ -910,16 +916,16 @@ class ConsultationDetailsDialog(QDialog):
                 font-size: 16pt;
                 font-weight: bold;
                 color: white;
-                background-color: #228be6;
+                background-color: #4169E1;
                 min-width: 120px;
                 min-height: 45px;
             }
             QPushButton:hover {
-                background-color: #1971c2;
+                background-color: #1E90FF;
                 transform: scale(1.02);
             }
             QPushButton:pressed {
-                background-color: #1864ab;
+                background-color: #0066CC;
                 transform: scale(0.98);
             }
         ''')
@@ -943,64 +949,64 @@ class ConsultationDetailsDialog(QDialog):
 
         # Faculty
         faculty_label = QLabel("Faculty:")
-        faculty_label.setStyleSheet("font-weight: bold; color: #495057;")
+        faculty_label.setStyleSheet("font-weight: bold; color: #DAA520;")
         faculty_value = QLabel(self.consultation.faculty.name)
-        faculty_value.setStyleSheet("font-weight: bold; font-size: 17pt; color: #228be6;")
+        faculty_value.setStyleSheet("font-weight: bold; font-size: 17pt; color: #4169E1;")
         details_layout.addRow(faculty_label, faculty_value)
 
         # Department
         dept_label = QLabel("Department:")
-        dept_label.setStyleSheet("font-weight: bold; color: #495057;")
+        dept_label.setStyleSheet("font-weight: bold; color: #DAA520;")
         dept_value = QLabel(self.consultation.faculty.department)
-        dept_value.setStyleSheet("font-size: 16pt; color: #343a40;")
+        dept_value.setStyleSheet("font-size: 16pt; color: #333333;")
         details_layout.addRow(dept_label, dept_value)
 
         # Course
         course_label = QLabel("Course:")
-        course_label.setStyleSheet("font-weight: bold; color: #495057;")
+        course_label.setStyleSheet("font-weight: bold; color: #DAA520;")
         course_value = QLabel(self.consultation.course_code if self.consultation.course_code else "N/A")
-        course_value.setStyleSheet("font-size: 16pt; color: #343a40;")
+        course_value.setStyleSheet("font-size: 16pt; color: #333333;")
         details_layout.addRow(course_label, course_value)
 
         # Status with enhanced visual styling
         status_label = QLabel("Status:")
-        status_label.setStyleSheet("font-weight: bold; color: #495057;")
+        status_label.setStyleSheet("font-weight: bold; color: #DAA520;")
         status_value = QLabel(self.consultation.status.value.capitalize())
 
-        # Define status colors with better contrast and accessibility
+        # Define status colors with gold and blue theme
         status_styles = {
             "pending": {
-                "color": "#000000",                # Black text
-                "background": "#ffd43b",           # Bright yellow background
-                "border": "2px solid #f08c00",     # Orange border
+                "color": "#B8860B",                # Dark goldenrod text
+                "background": "#FFF8DC",           # Cornsilk background
+                "border": "2px solid #DAA520",     # Goldenrod border
                 "padding": "10px 15px",
                 "border-radius": "8px"
             },
             "accepted": {
-                "color": "#ffffff",                # White text
-                "background": "#40c057",           # Bright green background
-                "border": "2px solid #2b8a3e",     # Dark green border
+                "color": "#228B22",                # Forest green text
+                "background": "#f0f8ff",           # Very light blue background
+                "border": "2px solid #228B22",     # Green border
                 "padding": "10px 15px",
                 "border-radius": "8px"
             },
             "busy": {
-                "color": "#ffffff",                # White text
-                "background": "#ff9800",           # Orange background for busy
-                "border": "2px solid #e65100",     # Darker orange border
+                "color": "#dc3545",                # Red text
+                "background": "#fff5f5",           # Very light red background
+                "border": "2px solid #dc3545",     # Red border
                 "padding": "10px 15px",
                 "border-radius": "8px"
             },
             "completed": {
-                "color": "#ffffff",                # White text
-                "background": "#339af0",           # Bright blue background
-                "border": "2px solid #1864ab",     # Dark blue border
+                "color": "#4169E1",                # Royal blue text
+                "background": "#E6F0FF",           # Light blue background
+                "border": "2px solid #4169E1",     # Royal blue border
                 "padding": "10px 15px",
                 "border-radius": "8px"
             },
             "cancelled": {
-                "color": "#ffffff",                # White text
-                "background": "#fa5252",           # Bright red background
-                "border": "2px solid #c92a2a",     # Dark red border
+                "color": "#B8860B",                # Dark goldenrod text
+                "background": "#FFF8DC",           # Cornsilk background
+                "border": "2px solid #B8860B",     # Dark goldenrod border
                 "padding": "10px 15px",
                 "border-radius": "8px"
             }
