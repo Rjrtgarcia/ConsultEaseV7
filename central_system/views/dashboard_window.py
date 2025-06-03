@@ -218,16 +218,18 @@ class DashboardWindow(BaseWindow):
     request_ui_refresh = pyqtSignal()
 
     def __init__(self, student=None, parent=None):
+        # Call parent __init__ FIRST before any other operations
+        super().__init__(parent)
+        
         self.student = student
         self.faculty_list = []
         self.consultation_panel = None
         
-        # Set up real-time consultation status updates
+        # Set up real-time consultation status updates after parent initialization
         self.setup_real_time_updates()
         
-        super().__init__(parent)
         self.init_ui()
-
+        
         # Set up smart refresh manager for optimized faculty status updates
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(False)
