@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap, QIcon
 import os
+import time
 
 from .base_window import BaseWindow
 from central_system.utils.theme import ConsultEaseTheme
@@ -182,19 +183,22 @@ class LoginWindow(BaseWindow):
         self.setCentralWidget(central_widget)
 
     def showEvent(self, event):
-        """Override showEvent"""
+        """Override showEvent with optimized RFID service refresh"""
         super().showEvent(event)
 
-        # Refresh RFID service to ensure it has the latest student data
+        # Only refresh RFID service if it hasn't been refreshed recently
         try:
-            from ..services import get_rfid_service
-            rfid_service = get_rfid_service()
-            rfid_service.refresh_student_data()
-            self.logger.info("Refreshed RFID service student data when login window shown")
+            current_time = time.time()
+            if not hasattr(self, '_last_rfid_refresh') or (current_time - self._last_rfid_refresh) > 30:
+                from ..services import get_rfid_service
+                rfid_service = get_rfid_service()
+                rfid_service.refresh_student_data()
+                self._last_rfid_refresh = current_time
+                self.logger.info("Refreshed RFID service student data on login window show")
+            else:
+                self.logger.debug("Skipping RFID refresh - too recent")
         except Exception as e:
             self.logger.error(f"Error refreshing RFID service: {str(e)}")
-            import traceback
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
 
         # Start RFID scanning when the window is shown
         self.logger.info("LoginWindow shown, starting RFID scanning")
@@ -211,17 +215,6 @@ class LoginWindow(BaseWindow):
         """
         Start the RFID scanning animation and process.
         """
-        # Refresh RFID service to ensure it has the latest student data
-        try:
-            from ..services import get_rfid_service
-            rfid_service = get_rfid_service()
-            rfid_service.refresh_student_data()
-            self.logger.info("Refreshed RFID service student data when starting RFID scanning")
-        except Exception as e:
-            self.logger.error(f"Error refreshing RFID service: {str(e)}")
-            import traceback
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
-
         self.rfid_reading = True
         self.scanning_status_label.setText("Scanning...")
         self.scanning_status_label.setStyleSheet(f"font-size: {ConsultEaseTheme.FONT_SIZE_XLARGE}pt; color: {ConsultEaseTheme.SECONDARY_COLOR};")
@@ -261,7 +254,7 @@ class LoginWindow(BaseWindow):
 
     def handle_rfid_read(self, rfid_uid, student=None):
         """
-        Handle RFID read event.
+        Handle RFID read event with optimized database access.
 
         Args:
             rfid_uid (str): The RFID UID that was read
@@ -275,14 +268,14 @@ class LoginWindow(BaseWindow):
         # If student is not provided, try to look it up directly
         if not student and rfid_uid:
             try:
-                # First refresh the RFID service to ensure it has the latest student data
-                try:
+                # Only refresh RFID service if it hasn't been refreshed very recently
+                current_time = time.time()
+                if not hasattr(self, '_last_rfid_refresh') or (current_time - self._last_rfid_refresh) > 10:
                     from ..services import get_rfid_service
                     rfid_service = get_rfid_service()
                     rfid_service.refresh_student_data()
-                    self.logger.info("Refreshed RFID service student data before looking up student")
-                except Exception as e:
-                    self.logger.error(f"Error refreshing RFID service: {str(e)}")
+                    self._last_rfid_refresh = current_time
+                    self.logger.info("Refreshed RFID service student data before student lookup")
 
                 from ..models import Student, get_db
                 db = get_db()
@@ -304,10 +297,10 @@ class LoginWindow(BaseWindow):
                 if student:
                     self.logger.info(f"LoginWindow: Found student directly: {student.name} with RFID: {rfid_uid}")
                 else:
-                    # Log all students in the database for debugging
-                    all_students = db.query(Student).all()
+                    # Log all students in the database for debugging (limited to first 10)
+                    all_students = db.query(Student).limit(10).all()
                     self.logger.warning(f"No student found for RFID {rfid_uid}")
-                    self.logger.info(f"Available students in database: {len(all_students)}")
+                    self.logger.info(f"Sample students in database: {len(all_students)}")
                     for s in all_students:
                         self.logger.info(f"  - ID: {s.id}, Name: {s.name}, RFID: {s.rfid_uid}")
             except Exception as e:

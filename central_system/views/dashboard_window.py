@@ -229,20 +229,29 @@ class DashboardWindow(BaseWindow):
         self.init_ui()
 
         # Set up smart refresh manager for optimized faculty status updates
-        self.smart_refresh = SmartRefreshManager(base_interval=180000, max_interval=600000)
         self.refresh_timer = QTimer(self)
+        self.refresh_timer.setSingleShot(False)
         self.refresh_timer.timeout.connect(self.refresh_faculty_status)
-        self.refresh_timer.start(180000)  # Start with 3 minutes
-
-        # Set up real-time MQTT subscription for faculty status updates
-        self.setup_realtime_updates()
+        self.refresh_timer.start(300000)  # Increased from 3 minutes to 5 minutes to reduce interruptions
+        
+        # Add adaptive refresh logic - reduce frequency when no changes detected
+        self._consecutive_no_changes = 0
+        self._max_refresh_interval = 600000  # Maximum 10 minutes
+        self._min_refresh_interval = 180000   # Minimum 3 minutes
+        
+        # Initialize last known state for change detection
+        self._last_faculty_hash = None
+        self._last_update_time = time.time()
+        
+        # Connect signals with debouncing to prevent spam
+        self.request_ui_refresh.connect(self._debounced_refresh)
+        self._refresh_debounce_timer = QTimer(self)
+        self._refresh_debounce_timer.setSingleShot(True)
+        self._refresh_debounce_timer.timeout.connect(self.refresh_faculty_status)
 
         # UI performance utilities
         self.ui_batcher = get_ui_batcher()
         self.widget_state_manager = get_widget_state_manager()
-
-        # Connect the UI refresh signal
-        self.request_ui_refresh.connect(self.refresh_faculty_status)
 
         # Faculty card manager for pooling
         self.faculty_card_manager = get_faculty_card_manager()
@@ -1102,9 +1111,17 @@ class DashboardWindow(BaseWindow):
 
     def refresh_faculty_status(self):
         """
-        Refresh faculty status with improved error handling and caching.
+        Refresh faculty status with improved error handling, caching, and adaptive refresh logic.
         """
         try:
+            current_time = time.time()
+            
+            # Implement adaptive refresh intervals based on activity
+            time_since_last_update = current_time - self._last_update_time
+            if time_since_last_update < 30:  # Don't refresh too frequently (less than 30 seconds)
+                logger.debug("Skipping refresh - too soon since last update")
+                return
+            
             # Import faculty controller
             from ..controllers import FacultyController
 
@@ -1114,8 +1131,9 @@ class DashboardWindow(BaseWindow):
             # Get all faculty
             faculties = faculty_controller.get_all_faculty()
 
-            # Convert to safe faculty data format
+            # Convert to safe faculty data format and generate hash for change detection
             safe_faculties = []
+            faculty_data_str = ""
             for faculty in faculties:
                 faculty_data = {
                     'id': faculty.id,
@@ -1127,19 +1145,44 @@ class DashboardWindow(BaseWindow):
                     'room': getattr(faculty, 'room', None)
                 }
                 safe_faculties.append(faculty_data)
+                # Create string for hash comparison
+                faculty_data_str += f"{faculty.id}:{faculty.name}:{faculty.status}:{faculty.department};"
 
-            # Check if data has changed before updating
-            new_hash = self._extract_safe_faculty_data(safe_faculties)
-            if hasattr(self, '_last_faculty_hash') and self._last_faculty_hash == new_hash:
+            # Generate hash for efficient change detection
+            import hashlib
+            new_hash = hashlib.md5(faculty_data_str.encode()).hexdigest()
+            
+            # Check if data has actually changed
+            if self._last_faculty_hash == new_hash:
                 logger.debug("Faculty data unchanged, skipping UI update")
+                self._consecutive_no_changes += 1
+                
+                # Implement adaptive refresh intervals - slow down if no changes
+                if self._consecutive_no_changes >= 3:  # After 3 consecutive no-changes
+                    current_interval = self.refresh_timer.interval()
+                    new_interval = min(current_interval * 1.5, self._max_refresh_interval)
+                    if new_interval != current_interval:
+                        self.refresh_timer.setInterval(int(new_interval))
+                        logger.info(f"Adapted refresh interval to {new_interval/1000} seconds due to no changes")
+                
+                self._last_update_time = current_time
                 return
+            
+            # Data has changed - reset adaptive logic and update UI
+            if self._consecutive_no_changes > 0:
+                # Reset refresh interval to minimum when changes are detected
+                self.refresh_timer.setInterval(self._min_refresh_interval)
+                logger.info("Reset refresh interval due to detected changes")
+                
+            self._consecutive_no_changes = 0
+            self._last_faculty_hash = new_hash
+            self._last_update_time = current_time
 
             # Update the grid using safe method
             self.populate_faculty_grid_safe(safe_faculties)
 
             # Store current faculty data for future comparison
             self._last_faculty_data_list = safe_faculties
-            self._last_faculty_hash = new_hash
 
             # Also update the consultation panel with the latest faculty options (convert back to objects)
             if hasattr(self, 'consultation_panel'):
@@ -1150,57 +1193,14 @@ class DashboardWindow(BaseWindow):
             if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
                 self.faculty_scroll.verticalScrollBar().setValue(0)
 
+            logger.debug(f"Faculty status refreshed successfully with {len(safe_faculties)} faculty members")
+
         except Exception as e:
             logger.error(f"Error refreshing faculty status: {str(e)}")
             self._show_error_message(f"Failed to refresh faculty list: {str(e)}")
-
-    def _extract_faculty_data(self, faculties):
-        """
-        Extract relevant data from faculty objects for comparison.
-
-        Args:
-            faculties (list): List of faculty objects
-
-        Returns:
-            str: Hash of faculty data for efficient comparison
-        """
-        import hashlib
-        # Create a string representation of all relevant faculty data
-        data_str = ""
-        for f in sorted(faculties, key=lambda x: x.id):  # Sort for consistent hashing
-            try:
-                # Access attributes safely to avoid DetachedInstanceError
-                faculty_id = f.id
-                faculty_name = f.name
-                faculty_status = f.status
-                faculty_department = getattr(f, 'department', '')
-                data_str += f"{faculty_id}:{faculty_name}:{faculty_status}:{faculty_department};"
-            except Exception as e:
-                logger.warning(f"Error accessing faculty attributes for hashing: {e}")
-                # Use a fallback representation
-                data_str += f"error:{e};"
-
-        # Return hash for efficient comparison
-        return hashlib.md5(data_str.encode()).hexdigest()
-
-    def _compare_faculty_data(self, old_hash, new_faculties):
-        """
-        Compare old and new faculty data to detect changes using hash comparison.
-
-        Args:
-            old_hash (str): Previous faculty data hash
-            new_faculties (list): New faculty objects
-
-        Returns:
-            bool: True if data is the same, False if there are changes
-        """
-        if old_hash is None:
-            return False  # First time, consider as changed
-
-        # Extract hash from new faculty objects
-        new_hash = self._extract_faculty_data(new_faculties)
-
-        return old_hash == new_hash
+            
+            # Reset consecutive changes counter on error to ensure we keep trying
+            self._consecutive_no_changes = 0
 
     def show_consultation_form(self, faculty_or_id):
         """
@@ -1505,10 +1505,13 @@ class DashboardWindow(BaseWindow):
 
     def showEvent(self, event):
         """
-        Handle window show event to trigger initial faculty data loading.
+        Handle window show event to trigger initial faculty data loading and real-time updates.
         """
         # Call parent showEvent first
         super().showEvent(event)
+
+        # Set up real-time updates when dashboard becomes visible
+        self.setup_realtime_updates()
 
         # Load faculty data immediately when the window is first shown
         # Only do this if we haven't loaded faculty data yet
@@ -1521,7 +1524,7 @@ class DashboardWindow(BaseWindow):
 
     def _perform_initial_faculty_load(self):
         """
-        Perform the initial load of faculty data.
+        Perform the initial load of faculty data with optimized performance.
         """
         try:
             from ..controllers import FacultyController
@@ -1529,8 +1532,9 @@ class DashboardWindow(BaseWindow):
             faculty_controller = FacultyController()
             faculties = faculty_controller.get_all_faculty()
 
-            # Convert to safe faculty data format
+            # Convert to safe faculty data format and generate hash
             safe_faculties = []
+            faculty_data_str = ""
             for faculty in faculties:
                 faculty_data = {
                     'id': faculty.id,
@@ -1542,15 +1546,22 @@ class DashboardWindow(BaseWindow):
                     'room': getattr(faculty, 'room', None)
                 }
                 safe_faculties.append(faculty_data)
+                faculty_data_str += f"{faculty.id}:{faculty.name}:{faculty.status}:{faculty.department};"
 
             if safe_faculties:
                 self.populate_faculty_grid_safe(safe_faculties)
                 self._last_faculty_data_list = safe_faculties
-                self._last_faculty_hash = self._extract_safe_faculty_data(safe_faculties)
+                
+                # Generate and store initial hash
+                import hashlib
+                self._last_faculty_hash = hashlib.md5(faculty_data_str.encode()).hexdigest()
+                self._last_update_time = time.time()
                 
                 # Update consultation panel options with object versions
                 if hasattr(self, 'consultation_panel'):
                     self.consultation_panel.set_faculty_options(faculties)
+                    
+                logger.info(f"Initial faculty load completed with {len(safe_faculties)} faculty members")
             else:
                 self._show_empty_faculty_message()
 
@@ -1578,254 +1589,74 @@ class DashboardWindow(BaseWindow):
         super().closeEvent(event)
 
     def setup_realtime_updates(self):
-        """Set up real-time MQTT subscriptions for faculty status updates."""
+        """
+        Set up real-time MQTT subscription for faculty status updates with improved reliability.
+        """
         try:
-            from ..utils.mqtt_utils import subscribe_to_topic
-            from ..utils.mqtt_topics import MQTTTopics
+            from ..services import get_async_mqtt_service
             
-            # Subscribe to faculty status updates
-            subscribe_to_topic("consultease/faculty/+/status_update", self.handle_realtime_status_update)
-            subscribe_to_topic(MQTTTopics.SYSTEM_NOTIFICATIONS, self.handle_system_notification)
-            
-            logger.info("Real-time faculty status updates enabled")
+            mqtt_service = get_async_mqtt_service()
+            if mqtt_service:
+                # Subscribe to faculty status updates
+                mqtt_service.subscribe("faculty/+/status", self.handle_realtime_status_update)
+                mqtt_service.subscribe("faculty/+/availability", self.handle_realtime_status_update)
+                mqtt_service.subscribe("consultation/+/status", self.handle_realtime_status_update)
+                logger.info("Set up real-time faculty status subscriptions")
+            else:
+                logger.warning("MQTT service not available for real-time updates")
         except Exception as e:
-            logger.error(f"Failed to set up real-time updates: {e}")
+            logger.error(f"Error setting up real-time updates: {e}")
 
     def cleanup_realtime_updates(self):
-        """Clean up MQTT subscriptions on window close."""
+        """
+        Clean up real-time MQTT subscriptions.
+        """
         try:
-            # Nothing to do here as MQTT subscriptions are handled at the service level
-            # and will be automatically removed when the application exits
-            pass
+            from ..services import get_async_mqtt_service
+            
+            mqtt_service = get_async_mqtt_service()
+            if mqtt_service:
+                mqtt_service.unsubscribe("faculty/+/status")
+                mqtt_service.unsubscribe("faculty/+/availability") 
+                mqtt_service.unsubscribe("consultation/+/status")
+                logger.info("Cleaned up real-time subscriptions")
         except Exception as e:
-            logger.error(f"Error cleaning up MQTT subscriptions: {e}")
+            logger.error(f"Error cleaning up real-time updates: {e}")
 
     def handle_realtime_status_update(self, topic, data):
         """
-        Handle real-time faculty status updates from MQTT.
-        
-        Args:
-            topic (str): MQTT topic
-            data (dict): Status update data
+        Handle real-time status updates from MQTT with improved processing.
         """
         try:
-            logger.info(f"[MQTT DASHBOARD HANDLER] handle_realtime_status_update - Topic: {topic}, Data: {data}")
-            logger.debug(f"Received real-time faculty status update: {data}")
+            logger.debug(f"Received real-time update: {topic} -> {data}")
             
-            # Extract faculty ID and status
-            faculty_id = data.get('faculty_id')
-            new_status = data.get('status')
-            
-            if faculty_id is None or new_status is None:
-                logger.warning(f"Invalid faculty status update: {data}")
-                return
+            # Parse topic to understand what changed
+            topic_parts = topic.split('/')
+            if len(topic_parts) >= 3:
+                entity_type = topic_parts[0]  # faculty or consultation
+                entity_id = topic_parts[1]
+                update_type = topic_parts[2]  # status or availability
                 
-            # Find and update the corresponding faculty card
-            card_updated = self.update_faculty_card_status(faculty_id, new_status)
-
-            # If the card was visible and updated, or even if not (status might affect filters),
-            # trigger a full refresh to ensure data consistency across the dashboard.
-            # This will re-fetch from DB, re-populate grid, and update consultation panel options.
-            logger.debug(f"Realtime update for faculty {faculty_id} processed, card_updated: {card_updated}. Triggering full UI refresh.")
-            # Use QTimer.singleShot to schedule the refresh in the next event loop iteration.
-            # This can help coalesce multiple rapid updates and avoid immediate heavy refresh on every single MQTT message.
-            self.request_ui_refresh.emit()
-            
+                if entity_type == "faculty":
+                    # Faculty status changed - trigger a minimal refresh
+                    logger.info(f"Faculty {entity_id} {update_type} changed")
+                    # Use debounced refresh to avoid spam
+                    self._debounced_refresh()
+                    
+                elif entity_type == "consultation":
+                    # Consultation status changed - update consultation panel
+                    logger.info(f"Consultation {entity_id} status changed")
+                    if hasattr(self, 'consultation_panel'):
+                        self.consultation_panel.refresh_history()
+                        
         except Exception as e:
             logger.error(f"Error handling real-time status update: {e}")
 
-    def handle_system_notification(self, topic, data):
+    def _debounced_refresh(self):
         """
-        Handle system notifications from MQTT.
-        
-        Args:
-            topic (str): MQTT topic
-            data (dict): Notification data
+        Handle the debounced refresh signal to prevent spam updates.
         """
-        try:
-            logger.info(f"[MQTT DASHBOARD HANDLER] handle_system_notification - Topic: {topic}, Data: {data}")
-            # Check if this is a faculty status notification
-            if data.get('type') == 'faculty_status':
-                faculty_id = data.get('faculty_id')
-                new_status = data.get('status')
-                
-                if faculty_id is not None and new_status is not None:
-                    # Update the faculty card
-                    card_updated = self.update_faculty_card_status(faculty_id, new_status)
-                    logger.debug(f"System notification for faculty {faculty_id} status processed, card_updated: {card_updated}. Triggering full UI refresh.")
-                    # Schedule a full refresh to ensure data consistency
-                    self.request_ui_refresh.emit()
-        except Exception as e:
-            logger.error(f"Error handling system notification: {e}")
-
-    def update_faculty_card_status(self, faculty_id, new_status_bool):
-        """
-        Update the status of a faculty card in real-time.
-        
-        Args:
-            faculty_id (int): Faculty ID
-            new_status_bool (bool): New status (True = Available, False = Unavailable)
-        """
-        try:
-            # Find the faculty card in the grid
-            for i in range(self.faculty_grid.count()):
-                container_widget = self.faculty_grid.itemAt(i).widget()
-                if not container_widget:
-                    continue
-                    
-                container_layout = container_widget.layout()
-                if not container_layout or container_layout.count() == 0:
-                    continue
-                    
-                faculty_card = container_layout.itemAt(0).widget()
-                # Ensure it's a PooledFacultyCard and has the method
-                if not faculty_card or not hasattr(faculty_card, 'update_status') or not hasattr(faculty_card, 'faculty_data'):
-                    continue
-                
-                if faculty_card.faculty_data.get('id') == faculty_id:
-                    status_string = "available" if new_status_bool else "offline" # Or "unavailable"
-                    
-                    # Update card's internal state and display using its own method
-                    faculty_card.update_status(status_string)
-                    
-                    # Update faculty_data dictionary stored in the card (if update_status doesn't do it)
-                    # PooledFacultyCard.update_status already updates self.faculty_data['status']
-                    # It also updates self.faculty_data['available'] effectively via the status string.
-                    faculty_card.faculty_data['available'] = new_status_bool
-
-
-                    # Update card's objectName for theming
-                    new_object_name = "faculty_card_available" if new_status_bool else "faculty_card_unavailable"
-                    if faculty_card.objectName() != new_object_name:
-                        faculty_card.setObjectName(new_object_name)
-                        # Force style refresh
-                        faculty_card.style().unpolish(faculty_card)
-                        faculty_card.style().polish(faculty_card)
-                        faculty_card.update()
-
-                    logger.debug(f"Updated faculty card for ID {faculty_id} to status: {status_string} via card method")
-                    return True # Found and updated
-            
-            logger.debug(f"Faculty card for ID {faculty_id} not found in current view for status update.")
-            return False # Card not found
-            
-        except Exception as e:
-            logger.error(f"Error updating faculty card status for ID {faculty_id}: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-
-    def setup_real_time_updates(self):
-        """
-        Set up real-time updates for consultation status changes.
-        """
-        try:
-            # Import and register with faculty response controller
-            from ..controllers.faculty_response_controller import get_faculty_response_controller
-            
-            self.faculty_response_controller = get_faculty_response_controller()
-            self.faculty_response_controller.register_callback(self.handle_faculty_response_update)
-            
-            logger.info("Registered for real-time consultation status updates")
-            
-        except Exception as e:
-            logger.error(f"Failed to set up real-time updates: {str(e)}")
-
-    def handle_faculty_response_update(self, response_data):
-        """
-        Handle real-time faculty response updates.
-        
-        Args:
-            response_data (dict): Faculty response data containing consultation updates
-        """
-        try:
-            # Check if this response is for the current student
-            student_id = response_data.get('student_id')
-            if not student_id:
-                return
-                
-            # Get current student ID
-            current_student_id = None
-            if isinstance(self.student, dict):
-                current_student_id = self.student.get('id')
-            else:
-                current_student_id = getattr(self.student, 'id', None)
-                
-            if current_student_id != student_id:
-                return  # Not for this student
-                
-            # Extract response information
-            response_type = response_data.get('response_type', 'Unknown')
-            faculty_name = response_data.get('faculty_name', 'Faculty')
-            consultation_id = response_data.get('consultation_id')
-            
-            # Show notification to student
-            self.show_consultation_status_notification(response_type, faculty_name, consultation_id)
-            
-            # Refresh consultation history if panel is available
-            if self.consultation_panel:
-                self.consultation_panel.refresh_history()
-                
-            logger.info(f"Processed real-time consultation update: {response_type} from {faculty_name}")
-            
-        except Exception as e:
-            logger.error(f"Error handling faculty response update: {str(e)}")
-
-    def show_consultation_status_notification(self, response_type, faculty_name, consultation_id):
-        """
-        Show a notification to the student about consultation status change.
-        
-        Args:
-            response_type (str): Type of faculty response (ACKNOWLEDGE, BUSY, etc.)
-            faculty_name (str): Name of the faculty member
-            consultation_id (int): ID of the consultation
-        """
-        try:
-            # Import notification utilities
-            from ..utils.notification import NotificationManager
-            
-            # Create appropriate notification message
-            if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
-                title = "Consultation Accepted!"
-                message = f"{faculty_name} has accepted your consultation request."
-                notification_type = NotificationManager.SUCCESS
-            elif response_type == "BUSY" or response_type == "UNAVAILABLE":
-                title = "Faculty Busy"
-                message = f"{faculty_name} is currently busy and cannot take your consultation request."
-                notification_type = NotificationManager.WARNING
-            elif response_type == "REJECTED" or response_type == "DECLINED":
-                title = "Consultation Declined"
-                message = f"{faculty_name} has declined your consultation request."
-                notification_type = NotificationManager.ERROR
-            elif response_type == "COMPLETED":
-                title = "Consultation Completed"
-                message = f"Your consultation with {faculty_name} has been completed."
-                notification_type = NotificationManager.INFO
-            else:
-                title = "Consultation Update"
-                message = f"{faculty_name} has responded to your consultation request."
-                notification_type = NotificationManager.INFO
-            
-            # Show the notification
-            NotificationManager.show_message(
-                self,
-                title,
-                message,
-                notification_type
-            )
-            
-        except ImportError:
-            # Fallback to basic message box if notification manager not available
-            from PyQt5.QtWidgets import QMessageBox
-            
-            if response_type == "ACKNOWLEDGE" or response_type == "ACCEPTED":
-                QMessageBox.information(self, "Consultation Accepted", 
-                                      f"{faculty_name} has accepted your consultation request.")
-            elif response_type == "BUSY" or response_type == "UNAVAILABLE":
-                QMessageBox.warning(self, "Faculty Busy", 
-                                  f"{faculty_name} is currently busy and cannot take your consultation request.")
-            else:
-                QMessageBox.information(self, "Consultation Update", 
-                                      f"{faculty_name} has responded to your consultation request.")
-        except Exception as e:
-            logger.error(f"Error showing consultation status notification: {str(e)}")
+        # Cancel any pending refresh
+        self._refresh_debounce_timer.stop()
+        # Schedule a new refresh after a short delay
+        self._refresh_debounce_timer.start(500)  # 500ms debounce

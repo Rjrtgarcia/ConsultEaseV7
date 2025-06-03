@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint
 from PyQt5.QtGui import QColor
 
 import logging
+import time
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -642,7 +643,6 @@ class ConsultationHistoryPanel(QFrame):
                 progress_callback(80, "Processing results...")
 
                 # Simulate a short delay for better UX
-                import time
                 time.sleep(0.5)
 
                 # Update progress
@@ -758,73 +758,73 @@ class ConsultationHistoryPanel(QFrame):
             # Actions
             actions_cell = QWidget()
             actions_layout = QHBoxLayout(actions_cell)
-            actions_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
-            actions_layout.setSpacing(8)  # Reduced spacing between buttons
-
-            # Add stretch before buttons for better centering
-            actions_layout.addStretch()
+            actions_layout.setContentsMargins(8, 8, 8, 8)  # Increased margins for better spacing
+            actions_layout.setSpacing(10)  # Increased spacing between buttons
+            actions_layout.setAlignment(Qt.AlignCenter)  # Ensure proper center alignment
 
             # View details button with improved sizing and styling
             view_button = QPushButton("View")
-            view_button.setFixedSize(55, 28)  # More compact size
+            view_button.setFixedSize(60, 32)  # Slightly larger for better touch interaction
             view_button.setStyleSheet("""
                 QPushButton {
                     background-color: #4169E1; 
                     color: white;
-                    border: 1px solid #DAA520;
-                    border-radius: 4px;
-                    font-size: 10pt;
+                    border: 2px solid #DAA520;
+                    border-radius: 6px;
+                    font-size: 11pt;
                     font-weight: bold;
-                    padding: 2px 6px;
+                    padding: 4px 8px;
                 }
                 QPushButton:hover {
                     background-color: #1E90FF;
-                    border: 1px solid #FFD700;
+                    border: 2px solid #FFD700;
+                    transform: scale(1.02);
                 }
                 QPushButton:pressed {
                     background-color: #0066CC;
-                    border: 1px solid #B8860B;
+                    border: 2px solid #B8860B;
+                    transform: scale(0.98);
                 }
             """)
             # Use a better lambda that ignores the checked parameter
             view_button.clicked.connect(lambda _, c=consultation: self.view_consultation_details(c))
-            actions_layout.addWidget(view_button)
+            actions_layout.addWidget(view_button, 0, Qt.AlignCenter)
 
             # Cancel button (only for pending consultations) with improved sizing and styling
             if consultation.status.value == "pending":
                 cancel_button = QPushButton("Cancel")
-                cancel_button.setFixedSize(65, 28)  # More compact size
+                cancel_button.setFixedSize(70, 32)  # Slightly larger for better touch interaction
                 cancel_button.setStyleSheet("""
                     QPushButton {
                         background-color: #DAA520; 
                         color: white;
-                        border: 1px solid #4169E1;
-                        border-radius: 4px;
-                        font-size: 10pt;
+                        border: 2px solid #4169E1;
+                        border-radius: 6px;
+                        font-size: 11pt;
                         font-weight: bold;
-                        padding: 2px 6px;
+                        padding: 4px 8px;
                     }
                     QPushButton:hover {
                         background-color: #FFD700;
-                        border: 1px solid #1E90FF;
+                        border: 2px solid #1E90FF;
                         color: #333333;
+                        transform: scale(1.02);
                     }
                     QPushButton:pressed {
                         background-color: #B8860B;
-                        border: 1px solid #0066CC;
+                        border: 2px solid #0066CC;
                         color: white;
+                        transform: scale(0.98);
                     }
                 """)
                 # Use a better lambda that ignores the checked parameter
                 cancel_button.clicked.connect(lambda _, c=consultation: self.cancel_consultation(c))
-                actions_layout.addWidget(cancel_button)
-
-            # Add stretch after buttons for perfect centering
-            actions_layout.addStretch()
+                actions_layout.addWidget(cancel_button, 0, Qt.AlignCenter)
 
             # Set size policy for proper widget sizing with better height
             actions_cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            actions_cell.setMinimumHeight(50)  # Increased minimum height for better button visibility
+            actions_cell.setMinimumHeight(56)  # Increased height for better button visibility and alignment
+            actions_cell.setMaximumHeight(56)  # Fixed height to ensure consistency
 
             self.consultation_table.setCellWidget(row_position, 4, actions_cell)
 
@@ -870,17 +870,21 @@ class ConsultationHistoryPanel(QFrame):
 
     def setup_mqtt_monitoring(self):
         """
-        Set up MQTT monitoring for faculty responses from desk units.
+        Set up MQTT monitoring for faculty responses from desk units with improved reliability.
         """
         try:
             import paho.mqtt.client as mqtt
             
-            # Create MQTT client
+            # Create MQTT client with improved configuration
             self.mqtt_client = mqtt.Client()
             self.mqtt_client.on_connect = self.on_mqtt_connect
             self.mqtt_client.on_message = self.on_mqtt_message
+            self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
             
-            # Connect to MQTT broker
+            # Set keep alive and reconnection settings
+            self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
+            
+            # Connect to MQTT broker with retry logic
             mqtt_server = "192.168.100.3"  # Same as FDU configuration
             mqtt_port = 1883
             
@@ -888,9 +892,15 @@ class ConsultationHistoryPanel(QFrame):
                 self.mqtt_client.connect(mqtt_server, mqtt_port, 60)
                 self.mqtt_client.loop_start()
                 logger.info("MQTT monitoring started for consultation updates")
+                
+                # Set up connection monitoring
+                self._mqtt_connected = False
+                self._mqtt_retry_count = 0
+                self._max_retries = 5
+                
             except Exception as e:
                 logger.warning(f"Could not connect to MQTT broker: {e}")
-                self.mqtt_client = None
+                self._schedule_mqtt_reconnect()
                 
         except ImportError:
             logger.warning("paho-mqtt not available, MQTT monitoring disabled")
@@ -898,56 +908,130 @@ class ConsultationHistoryPanel(QFrame):
 
     def on_mqtt_connect(self, client, userdata, flags, rc):
         """
-        Callback for MQTT connection.
+        Callback for MQTT connection with improved subscription handling.
         """
         if rc == 0:
             logger.info("Connected to MQTT broker for consultation monitoring")
-            # Subscribe to faculty response topics
-            client.subscribe("consultease/faculty/+/responses")
-            client.subscribe("faculty/+/responses")  # Legacy compatibility
+            self._mqtt_connected = True
+            self._mqtt_retry_count = 0
+            
+            # Subscribe to faculty response topics with multiple patterns for reliability
+            topics = [
+                "consultease/faculty/+/responses",
+                "faculty/+/responses",  # Legacy compatibility
+                "consultation/+/status",  # Real-time status updates
+                "faculty/+/status",  # Faculty availability updates
+            ]
+            
+            for topic in topics:
+                client.subscribe(topic)
+                logger.debug(f"Subscribed to MQTT topic: {topic}")
         else:
             logger.error(f"Failed to connect to MQTT broker: {rc}")
+            self._mqtt_connected = False
+            self._schedule_mqtt_reconnect()
+
+    def on_mqtt_disconnect(self, client, userdata, rc):
+        """
+        Callback for MQTT disconnection with automatic reconnection.
+        """
+        logger.warning(f"Disconnected from MQTT broker: {rc}")
+        self._mqtt_connected = False
+        if rc != 0:  # Unexpected disconnection
+            self._schedule_mqtt_reconnect()
+
+    def _schedule_mqtt_reconnect(self):
+        """
+        Schedule MQTT reconnection with exponential backoff.
+        """
+        if self._mqtt_retry_count < self._max_retries:
+            delay = min(1000 * (2 ** self._mqtt_retry_count), 30000)  # Max 30 seconds
+            self._mqtt_retry_count += 1
+            
+            logger.info(f"Scheduling MQTT reconnection attempt {self._mqtt_retry_count} in {delay/1000} seconds")
+            QTimer.singleShot(delay, self._attempt_mqtt_reconnect)
+        else:
+            logger.error("Max MQTT reconnection attempts reached")
+
+    def _attempt_mqtt_reconnect(self):
+        """
+        Attempt to reconnect to MQTT broker.
+        """
+        try:
+            if self.mqtt_client and not self._mqtt_connected:
+                self.mqtt_client.reconnect()
+                logger.info("MQTT reconnection attempt initiated")
+        except Exception as e:
+            logger.error(f"MQTT reconnection failed: {e}")
+            self._schedule_mqtt_reconnect()
 
     def on_mqtt_message(self, client, userdata, msg):
         """
-        Handle MQTT messages from faculty desk units.
+        Handle MQTT messages from faculty desk units with improved processing.
         """
         try:
             import json
             
             # Parse the message
             message_str = msg.payload.decode('utf-8')
-            logger.info(f"Received faculty response: {message_str}")
+            topic = msg.topic
+            logger.info(f"Received MQTT message on {topic}: {message_str}")
             
-            # Parse JSON response
-            response_data = json.loads(message_str)
+            # Parse JSON response if applicable
+            try:
+                response_data = json.loads(message_str)
+            except json.JSONDecodeError:
+                # Handle non-JSON messages (e.g., simple status updates)
+                response_data = {'raw_message': message_str, 'topic': topic}
             
-            # Check if this response affects current student's consultations
-            if self.student:
-                student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
+            # Process different types of updates
+            if 'consultation' in topic.lower() or 'responses' in topic.lower():
+                self._handle_consultation_update(response_data, topic)
+            elif 'status' in topic.lower():
+                self._handle_status_update(response_data, topic)
                 
-                # Extract message ID from response
-                message_id = response_data.get('message_id', '')
-                response_type = response_data.get('response_type', '')
-                faculty_id = response_data.get('faculty_id', '')
-                
-                # Check if any of our consultations match this response
-                for consultation in self.consultations:
-                    consultation_id_str = str(consultation.id)
-                    if (message_id == consultation_id_str or 
-                        (consultation.faculty_id == faculty_id and consultation.status.value == 'pending')):
-                        
-                        logger.info(f"Faculty response received for consultation {consultation.id}: {response_type}")
-                        
-                        # Schedule refresh after a short delay to allow database update
-                        QTimer.singleShot(2000, self.refresh_consultations)
-                        
-                        # Show notification to user
-                        self.show_faculty_response_notification(response_type, consultation.faculty.name)
-                        break
-                        
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}")
+
+    def _handle_consultation_update(self, response_data, topic):
+        """
+        Handle consultation-specific MQTT updates.
+        """
+        if not self.student:
+            return
+            
+        student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
+        
+        # Extract message details
+        message_id = response_data.get('message_id', '')
+        response_type = response_data.get('response_type', '')
+        faculty_id = response_data.get('faculty_id', '')
+        
+        # Check if any of our consultations match this response
+        consultation_found = False
+        for consultation in self.consultations:
+            consultation_id_str = str(consultation.id)
+            if (message_id == consultation_id_str or 
+                (consultation.faculty_id == faculty_id and consultation.status.value == 'pending')):
+                
+                logger.info(f"Faculty response received for consultation {consultation.id}: {response_type}")
+                consultation_found = True
+                
+                # Show immediate notification
+                self.show_faculty_response_notification(response_type, consultation.faculty.name)
+                break
+        
+        if consultation_found:
+            # Schedule refresh after a short delay to allow database update
+            QTimer.singleShot(1000, self.refresh_consultations)  # Reduced delay for faster updates
+
+    def _handle_status_update(self, response_data, topic):
+        """
+        Handle general status updates (faculty availability, etc.).
+        """
+        logger.debug(f"Processing status update: {response_data}")
+        # Trigger a consultation refresh in case status affects pending consultations
+        QTimer.singleShot(500, self.refresh_consultations)
 
     def show_faculty_response_notification(self, response_type, faculty_name):
         """
@@ -1239,18 +1323,22 @@ class ConsultationPanel(QTabWidget):
         self.student = student
         self.init_ui()
 
-        # Set up auto-refresh timer for history panel
+        # Set up optimized auto-refresh timer for history panel
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.auto_refresh_history)
-        self.refresh_timer.start(60000)  # Refresh every minute
+        self.refresh_timer.start(120000)  # Reduced frequency: refresh every 2 minutes instead of 1
 
         # Connect tab change signal
         self.currentChanged.connect(self.on_tab_changed)
 
-        # Set up periodic MQTT check for real-time updates
+        # Set up MQTT monitoring for real-time updates (more important than polling)
         self.mqtt_check_timer = QTimer(self)
         self.mqtt_check_timer.timeout.connect(self.check_mqtt_status)
-        self.mqtt_check_timer.start(30000)  # Check every 30 seconds
+        self.mqtt_check_timer.start(60000)  # Reduced frequency: check every minute instead of 30 seconds
+        
+        # Track last refresh to avoid unnecessary updates
+        self._last_refresh_time = 0
+        self._min_refresh_interval = 30  # Minimum 30 seconds between refreshes
 
     def init_ui(self):
         """
@@ -1680,11 +1768,33 @@ class ConsultationPanel(QTabWidget):
 
     def auto_refresh_history(self):
         """
-        Automatically refresh the history panel periodically.
+        Automatically refresh the history panel periodically with intelligent timing.
         """
-        # Only refresh if the history tab is visible
-        if self.currentIndex() == 1:
-            self.history_panel.refresh_consultations()
+        current_time = time.time()
+        
+        # Check if enough time has passed since last refresh
+        if current_time - self._last_refresh_time < self._min_refresh_interval:
+            logger.debug("Skipping auto-refresh - too soon since last refresh")
+            return
+        
+        # Only refresh if the history tab is visible and window is active
+        if self.currentIndex() == 1:  # History tab
+            # Check if parent window is active to avoid refreshing when not in use
+            try:
+                parent_window = self.window()
+                if parent_window and (parent_window.isActiveWindow() or parent_window.isVisible()):
+                    logger.debug("Auto-refreshing consultation history")
+                    self.history_panel.refresh_consultations()
+                    self._last_refresh_time = current_time
+                else:
+                    logger.debug("Skipping auto-refresh - window not active")
+            except Exception as e:
+                logger.debug(f"Error checking window state: {e}")
+                # Fallback to refresh anyway
+                self.history_panel.refresh_consultations()
+                self._last_refresh_time = current_time
+        else:
+            logger.debug("Skipping auto-refresh - history tab not visible")
 
     def refresh_history(self):
         """
