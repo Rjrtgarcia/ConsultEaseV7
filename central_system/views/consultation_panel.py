@@ -650,8 +650,8 @@ class ConsultationHistoryPanel(QFrame):
             consultation_controller = ConsultationController()
 
             try:
-                # Get consultations for the current student
-                consultations = consultation_controller.get_consultations_by_student(student_id)
+                # Get consultations for the current student using the correct method
+                consultations = consultation_controller.get_consultations(student_id=student_id)
                 logger.info(f"📊 CONSULTATION REFRESH - Found {len(consultations)} consultations for student {student_id}")
                 
                 # Log details of each consultation
