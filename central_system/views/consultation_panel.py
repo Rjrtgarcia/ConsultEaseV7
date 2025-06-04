@@ -3,43 +3,21 @@ Consultation panel module.
 Contains the consultation request form and consultation history panel.
 """
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                            QPushButton, QFrame, QLineEdit, QTextEdit,
-                            QComboBox, QMessageBox, QTabWidget, QTableWidget,
-                            QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
-                            QSizePolicy, QProgressBar, QApplication)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QThread, QObject
-from PyQt5.QtGui import QColor
-
 import logging
 import time
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                            QPushButton, QFrame, QLineEdit, QTextEdit,
+                            QComboBox, QMessageBox, QTabWidget, QTableWidget,
+                            QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
+                            QSizePolicy, QProgressBar, QApplication)
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint
+from PyQt5.QtGui import QColor
+
 # Set up logging
 logger = logging.getLogger(__name__)
-
-class ConsultationWorker(QObject):
-    """
-    Worker class for loading consultations in a separate thread.
-    """
-    finished = pyqtSignal(list)
-    error = pyqtSignal(str)
-    progress = pyqtSignal(int)
-
-    def __init__(self, load_function):
-        super().__init__()
-        self.load_function = load_function
-
-    def run(self):
-        """
-        Run the consultation loading function.
-        """
-        try:
-            result = self.load_function(self.progress)
-            self.finished.emit(result)
-        except Exception as e:
-            self.error.emit(str(e))
 
 class ConsultationRequestForm(QFrame):
     """
@@ -643,65 +621,34 @@ class ConsultationHistoryPanel(QFrame):
         # Show loading state
         self.consultation_table.setRowCount(0)
         self.consultation_table.setItem(0, 0, QTableWidgetItem("Loading consultations..."))
-
-        def load_consultations(progress_callback):
+        
+        try:
             # Import consultation controller
             from ..controllers.consultation_controller import ConsultationController
             consultation_controller = ConsultationController()
 
-            try:
-                # Get consultations for the current student using the correct method
-                consultations = consultation_controller.get_consultations(student_id=student_id)
-                logger.info(f"📊 CONSULTATION REFRESH - Found {len(consultations)} consultations for student {student_id}")
-                
-                # Log details of each consultation
-                for i, consultation in enumerate(consultations):
-                    logger.debug(f"   Consultation {i+1}: ID={consultation.id}, Status={consultation.status.value}, Faculty={consultation.faculty_id}, Created={consultation.created_at}")
-                
-                progress_callback.emit(100)
-                return consultations
-            except Exception as e:
-                logger.error(f"❌ CONSULTATION REFRESH ERROR: {e}")
-                import traceback
-                logger.error(f"❌ Traceback: {traceback.format_exc()}")
-                raise e
-
-        def on_consultations_loaded(consultations):
-            """Handle successful consultation loading."""
-            try:
-                logger.info(f"✅ CONSULTATION LOAD SUCCESS - Processing {len(consultations)} consultations")
-                self.consultations = consultations
-                self.update_consultation_table()
-                logger.info(f"✅ CONSULTATION TABLE UPDATED with {len(consultations)} rows")
-            except Exception as e:
-                logger.error(f"❌ Error updating consultation table: {e}")
-                import traceback
-                logger.error(f"❌ Traceback: {traceback.format_exc()}")
-
-        def on_consultations_error(error):
-            """Handle consultation loading error."""
-            logger.error(f"❌ CONSULTATION LOAD FAILED: {error}")
+            # Get consultations for the current student using the correct method
+            consultations = consultation_controller.get_consultations(student_id=student_id)
+            logger.info(f"📊 CONSULTATION REFRESH - Found {len(consultations)} consultations for student {student_id}")
+            
+            # Log details of each consultation
+            for i, consultation in enumerate(consultations):
+                logger.debug(f"   Consultation {i+1}: ID={consultation.id}, Status={consultation.status.value}, Faculty={consultation.faculty_id}, Created={consultation.created_at}")
+            
+            # Update consultations and table
+            logger.info(f"✅ CONSULTATION LOAD SUCCESS - Processing {len(consultations)} consultations")
+            self.consultations = consultations
+            self.update_consultation_table()
+            logger.info(f"✅ CONSULTATION TABLE UPDATED with {len(consultations)} rows")
+            
+        except Exception as e:
+            logger.error(f"❌ CONSULTATION REFRESH ERROR: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            
+            # Show error state in table
             self.consultation_table.setRowCount(1)
             self.consultation_table.setItem(0, 0, QTableWidgetItem("Error loading consultations"))
-
-        # Use QThread for non-blocking database access
-        self.worker_thread = QThread()
-        self.worker = ConsultationWorker(load_consultations)
-        self.worker.moveToThread(self.worker_thread)
-
-        # Connect signals
-        self.worker.finished.connect(on_consultations_loaded)
-        self.worker.error.connect(on_consultations_error)
-        self.worker.progress.connect(lambda: None)  # Progress indicator if needed
-
-        # Clean up thread when done
-        self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.error.connect(self.worker_thread.quit)
-        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-
-        # Start the worker
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker_thread.start()
 
     def update_consultation_table(self):
         """
