@@ -1485,50 +1485,151 @@ void clearCurrentMessage() {
 // ================================
 // WIFI FUNCTIONS
 // ================================
+
+// Enhanced WiFi connection variables
+int wifiRetryCount = 0;
+unsigned long lastWifiReconnectAttempt = 0;
+int maxWifiRetries = 10;
+int wifiReconnectDelay = 5000;  // Base delay, will increase exponentially
+int currentWifiRSSI = -100;
+bool wifiConnectionStable = false;
+unsigned long wifiStableTime = 0;
+
 void setupWiFi() {
-  DEBUG_PRINT("Connecting to WiFi: ");
+  DEBUG_PRINT("🔧 Enhanced WiFi setup - Connecting to: ");
   DEBUG_PRINTLN(WIFI_SSID);
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Configure WiFi for maximum reliability
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(false); // We handle reconnection manually for better control
+  
+  // Disable power management for stable connection
+  WiFi.setSleep(false);
+  
+  wifiRetryCount = 0;
+  connectWiFiWithBackoff();
+}
 
+void connectWiFiWithBackoff() {
+  if (wifiRetryCount >= maxWifiRetries) {
+    DEBUG_PRINTF("❌ WiFi connection failed after %d attempts\n", maxWifiRetries);
+    wifiConnected = false;
+    updateSystemStatus();
+    return;
+  }
+
+  DEBUG_PRINTF("📡 WiFi connection attempt %d/%d\n", wifiRetryCount + 1, maxWifiRetries);
+  
+  // Disconnect any existing connection
+  WiFi.disconnect(true);
+  delay(500);
+  
+  // Start new connection
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  
   unsigned long startTime = millis();
-  while (WiFi.status() != WL_CONNECTED &&
-         (millis() - startTime) < WIFI_CONNECT_TIMEOUT) {
+  unsigned long timeout = WIFI_CONNECT_TIMEOUT + (wifiRetryCount * 5000); // Increase timeout with retries
+  
+  while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < timeout) {
     delay(500);
     DEBUG_PRINT(".");
     updateSystemStatus();
+    
+    // Check for specific error conditions
+    wl_status_t status = WiFi.status();
+    if (status == WL_CONNECT_FAILED) {
+      DEBUG_PRINTF("\n❌ WiFi connection failed with status: %d\n", status);
+      break;
+    }
   }
 
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
-    DEBUG_PRINTLN(" connected!");
-    DEBUG_PRINT("IP address: ");
-    DEBUG_PRINTLN(WiFi.localIP());
+    wifiRetryCount = 0; // Reset retry count on successful connection
+    wifiStableTime = millis();
+    wifiConnectionStable = false; // Will be set to true after stability period
+    
+    currentWifiRSSI = WiFi.RSSI();
+    DEBUG_PRINTF("\n✅ WiFi connected! IP: %s, RSSI: %d dBm\n", 
+                WiFi.localIP().toString().c_str(), currentWifiRSSI);
+    
+    // Check connection quality
+    if (currentWifiRSSI > -70) {
+      DEBUG_PRINTLN("📶 Excellent signal strength");
+    } else if (currentWifiRSSI > -80) {
+      DEBUG_PRINTLN("📶 Good signal strength");
+    } else {
+      DEBUG_PRINTLN("⚠️ Weak signal strength - may cause instability");
+    }
+    
     setupTimeWithRetry();
+    updateSystemStatus();
   } else {
     wifiConnected = false;
-    DEBUG_PRINTLN(" failed!");
+    wifiRetryCount++;
+    
+    // Calculate exponential backoff delay
+    int backoffDelay = wifiReconnectDelay * (1 << min(wifiRetryCount - 1, 4)); // Cap at 16x base delay
+    
+    DEBUG_PRINTF("\n❌ WiFi connection failed! Retry in %d seconds\n", backoffDelay / 1000);
+    lastWifiReconnectAttempt = millis();
+    wifiReconnectDelay = backoffDelay;
+    updateSystemStatus();
   }
-  updateSystemStatus();
 }
 
 void checkWiFiConnection() {
+  unsigned long now = millis();
+  
+  // Check if WiFi is still connected
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiConnected) {
+      DEBUG_PRINTLN("⚠️ WiFi connection lost!");
       wifiConnected = false;
+      wifiConnectionStable = false;
       timeInitialized = false;
+      mqttConnected = false; // Force MQTT reconnection
       updateSystemStatus();
     }
 
-    static unsigned long lastReconnectAttempt = 0;
-    if (millis() - lastReconnectAttempt > WIFI_RECONNECT_INTERVAL) {
-      WiFi.reconnect();
-      lastReconnectAttempt = millis();
+    // Attempt reconnection with backoff
+    if (now - lastWifiReconnectAttempt > wifiReconnectDelay) {
+      connectWiFiWithBackoff();
     }
-  } else if (!wifiConnected) {
-    wifiConnected = true;
-    setupTimeWithRetry();
-    updateSystemStatus();
+  } else {
+    // WiFi is connected - monitor quality and stability
+    if (!wifiConnected) {
+      DEBUG_PRINTLN("✅ WiFi reconnected!");
+      wifiConnected = true;
+      wifiStableTime = millis();
+      wifiConnectionStable = false;
+      setupTimeWithRetry();
+      updateSystemStatus();
+    }
+    
+    // Check connection stability (mark as stable after 30 seconds)
+    if (!wifiConnectionStable && (now - wifiStableTime > 30000)) {
+      wifiConnectionStable = true;
+      DEBUG_PRINTLN("🔒 WiFi connection is now stable");
+      wifiRetryCount = 0; // Reset retry count after stable connection
+      wifiReconnectDelay = 5000; // Reset delay
+    }
+    
+    // Monitor signal strength every 30 seconds
+    static unsigned long lastRSSICheck = 0;
+    if (now - lastRSSICheck > 30000) {
+      int newRSSI = WiFi.RSSI();
+      if (abs(newRSSI - currentWifiRSSI) > 10) { // Significant change
+        DEBUG_PRINTF("📶 Signal strength changed: %d dBm -> %d dBm\n", currentWifiRSSI, newRSSI);
+        currentWifiRSSI = newRSSI;
+        
+        // Warn about poor signal quality
+        if (currentWifiRSSI < -85) {
+          DEBUG_PRINTLN("⚠️ Poor signal quality - connection may become unstable");
+        }
+      }
+      lastRSSICheck = now;
+    }
   }
 }
 
@@ -1694,34 +1795,155 @@ void checkPeriodicTimeSync() {
 // ================================
 // MQTT FUNCTIONS
 // ================================
+
+// Enhanced MQTT connection variables
+int mqttRetryCount = 0;
+unsigned long lastMqttReconnectAttempt = 0;
+int maxMqttRetries = 10;
+int mqttReconnectDelay = 5000;  // Base delay, will increase exponentially
+bool mqttConnectionStable = false;
+unsigned long mqttStableTime = 0;
+unsigned long lastMqttHeartbeat = 0;
+
 void setupMQTT() {
-  // ✅ ADD THIS LINE: Set buffer size BEFORE setting server
+  // Set buffer size BEFORE setting server
   mqttClient.setBufferSize(MQTT_MAX_PACKET_SIZE);
   
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setCallback(onMqttMessage);
   mqttClient.setKeepAlive(MQTT_KEEPALIVE);
   
-  // ✅ ADD DEBUG: Verify buffer size was set
-  DEBUG_PRINTF("📦 MQTT Buffer Size set to: %d bytes\n", MQTT_MAX_PACKET_SIZE);
+  // Set socket timeout for faster detection of connection issues
+  mqttClient.setSocketTimeout(15); // 15 seconds
+  
+  DEBUG_PRINTF("📦 Enhanced MQTT setup - Buffer: %d bytes, Server: %s:%d\n", 
+               MQTT_MAX_PACKET_SIZE, MQTT_SERVER, MQTT_PORT);
+  
+  mqttRetryCount = 0;
+  mqttConnectionStable = false;
 }
 
 void connectMQTT() {
-  if (millis() - lastMqttReconnect < 5000) return;
-  lastMqttReconnect = millis();
+  if (!wifiConnected) {
+    DEBUG_PRINTLN("⚠️ Cannot connect MQTT - WiFi not connected");
+    return;
+  }
+  
+  unsigned long now = millis();
+  
+  // Respect reconnection delay
+  if (now - lastMqttReconnectAttempt < mqttReconnectDelay) {
+    return;
+  }
+  
+  if (mqttRetryCount >= maxMqttRetries) {
+    DEBUG_PRINTF("❌ MQTT connection failed after %d attempts\n", maxMqttRetries);
+    return;
+  }
 
-  DEBUG_PRINT("MQTT connecting...");
+  DEBUG_PRINTF("📡 MQTT connection attempt %d/%d to %s:%d\n", 
+               mqttRetryCount + 1, maxMqttRetries, MQTT_SERVER, MQTT_PORT);
+  
+  lastMqttReconnectAttempt = now;
+  
+  // Generate unique client ID to avoid conflicts
+  uint64_t chipid = ESP.getEfuseMac();
+  String clientId = String(MQTT_CLIENT_ID) + "_" + String((uint32_t)chipid, HEX) + "_" + String(random(0xffff), HEX);
+  
+  bool connected = false;
+  if (strlen(MQTT_USERNAME) > 0) {
+    connected = mqttClient.connect(clientId.c_str(), MQTT_USERNAME, MQTT_PASSWORD);
+  } else {
+    connected = mqttClient.connect(clientId.c_str());
+  }
 
-  if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD)) {
+  if (connected) {
     mqttConnected = true;
-    DEBUG_PRINTLN(" connected!");
-    mqttClient.subscribe(MQTT_TOPIC_MESSAGES, MQTT_QOS);
+    mqttRetryCount = 0; // Reset retry count
+    mqttReconnectDelay = 5000; // Reset delay
+    mqttStableTime = now;
+    mqttConnectionStable = false;
+    lastMqttHeartbeat = now;
+    
+    DEBUG_PRINTLN("✅ MQTT connected!");
+    
+    // Subscribe to topics
+    bool subSuccess = mqttClient.subscribe(MQTT_TOPIC_MESSAGES, MQTT_QOS);
+    DEBUG_PRINTF("📨 Subscription to %s: %s\n", MQTT_TOPIC_MESSAGES, subSuccess ? "SUCCESS" : "FAILED");
+    
+    // Publish presence immediately
     publishPresenceUpdate();
     updateSystemStatus();
+    
+    // Process any queued messages
+    updateOfflineQueue();
+    
   } else {
     mqttConnected = false;
-    DEBUG_PRINTLN(" failed!");
+    mqttRetryCount++;
+    
+    int mqttState = mqttClient.state();
+    DEBUG_PRINTF("❌ MQTT connection failed! State: %d (%s)\n", mqttState, getMqttStateString(mqttState));
+    
+    // Calculate exponential backoff delay
+    int backoffDelay = mqttReconnectDelay * (1 << min(mqttRetryCount - 1, 4)); // Cap at 16x base delay
+    mqttReconnectDelay = min(backoffDelay, 60000); // Cap at 60 seconds
+    
+    DEBUG_PRINTF("🔄 Next MQTT retry in %d seconds\n", mqttReconnectDelay / 1000);
     updateSystemStatus();
+  }
+}
+
+void checkMQTTConnection() {
+  if (!wifiConnected) {
+    if (mqttConnected) {
+      mqttConnected = false;
+      mqttConnectionStable = false;
+      updateSystemStatus();
+    }
+    return;
+  }
+  
+  unsigned long now = millis();
+  
+  // Check if MQTT is still connected
+  if (!mqttClient.connected()) {
+    if (mqttConnected) {
+      DEBUG_PRINTLN("⚠️ MQTT connection lost!");
+      mqttConnected = false;
+      mqttConnectionStable = false;
+      updateSystemStatus();
+    }
+    
+    // Attempt reconnection
+    connectMQTT();
+  } else {
+    // MQTT is connected - monitor stability and send heartbeats
+    if (!mqttConnected) {
+      DEBUG_PRINTLN("✅ MQTT reconnected!");
+      mqttConnected = true;
+      mqttStableTime = now;
+      mqttConnectionStable = false;
+      lastMqttHeartbeat = now;
+      updateSystemStatus();
+    }
+    
+    // Check connection stability (mark as stable after 30 seconds)
+    if (!mqttConnectionStable && (now - mqttStableTime > 30000)) {
+      mqttConnectionStable = true;
+      DEBUG_PRINTLN("🔒 MQTT connection is now stable");
+      mqttRetryCount = 0; // Reset retry count after stable connection
+    }
+    
+    // Send periodic heartbeat to keep connection alive
+    if (now - lastMqttHeartbeat > 30000) { // Every 30 seconds
+      DEBUG_PRINTLN("💓 Sending MQTT keepalive heartbeat");
+      publishHeartbeat();
+      lastMqttHeartbeat = now;
+    }
+    
+    // Process MQTT loop frequently for stability
+    mqttClient.loop();
   }
 }
 
@@ -1857,12 +2079,86 @@ void publishHeartbeat() {
   payload += "\"uptime\":" + String(millis()) + ",";
   payload += "\"free_heap\":" + String(ESP.getFreeHeap()) + ",";
   payload += "\"wifi_connected\":" + String(wifiConnected ? "true" : "false") + ",";
+  payload += "\"wifi_rssi\":" + String(currentWifiRSSI) + ",";
+  payload += "\"wifi_stable\":" + String(wifiConnectionStable ? "true" : "false") + ",";
+  payload += "\"mqtt_stable\":" + String(mqttConnectionStable ? "true" : "false") + ",";
+  payload += "\"wifi_retries\":" + String(wifiRetryCount) + ",";
+  payload += "\"mqtt_retries\":" + String(mqttRetryCount) + ",";
   payload += "\"time_initialized\":" + String(timeInitialized ? "true" : "false") + ",";
   payload += "\"ntp_sync_status\":\"" + ntpSyncStatus + "\",";
-  payload += "\"presence_status\":\"" + presenceDetector.getStatusString() + "\"";
+  payload += "\"presence_status\":\"" + presenceDetector.getStatusString() + "\",";
+  payload += "\"queue_size\":" + String(queueCount) + ",";
+  payload += "\"consultation_queue_size\":" + String(consultationQueueSize);
   payload += "}";
 
   mqttClient.publish(MQTT_TOPIC_HEARTBEAT, payload.c_str());
+  DEBUG_PRINTF("💓 Enhanced heartbeat published - WiFi: %d dBm, Stable: %s/%s\n", 
+               currentWifiRSSI, 
+               wifiConnectionStable ? "Y" : "N", 
+               mqttConnectionStable ? "Y" : "N");
+}
+
+// ================================
+// CONNECTION DIAGNOSTICS AND MONITORING
+// ================================
+
+void printConnectionDiagnostics() {
+  DEBUG_PRINTLN("📊 === CONNECTION DIAGNOSTICS ===");
+  DEBUG_PRINTF("WiFi Status: %s\n", wifiConnected ? "CONNECTED" : "DISCONNECTED");
+  if (wifiConnected) {
+    DEBUG_PRINTF("  SSID: %s\n", WiFi.SSID().c_str());
+    DEBUG_PRINTF("  IP Address: %s\n", WiFi.localIP().toString().c_str());
+    DEBUG_PRINTF("  RSSI: %d dBm\n", currentWifiRSSI);
+    DEBUG_PRINTF("  Signal Quality: %s\n", currentWifiRSSI > -70 ? "EXCELLENT" : 
+                                         currentWifiRSSI > -80 ? "GOOD" : "POOR");
+    DEBUG_PRINTF("  Stable: %s (uptime: %lu ms)\n", 
+                 wifiConnectionStable ? "YES" : "NO", 
+                 wifiConnectionStable ? millis() - wifiStableTime : 0);
+    DEBUG_PRINTF("  Retry Count: %d/%d\n", wifiRetryCount, maxWifiRetries);
+  }
+  
+  DEBUG_PRINTF("MQTT Status: %s\n", mqttConnected ? "CONNECTED" : "DISCONNECTED");
+  if (mqttConnected) {
+    DEBUG_PRINTF("  Server: %s:%d\n", MQTT_SERVER, MQTT_PORT);
+    DEBUG_PRINTF("  Client ID: %s\n", MQTT_CLIENT_ID);
+    DEBUG_PRINTF("  Stable: %s (uptime: %lu ms)\n", 
+                 mqttConnectionStable ? "YES" : "NO",
+                 mqttConnectionStable ? millis() - mqttStableTime : 0);
+    DEBUG_PRINTF("  Retry Count: %d/%d\n", mqttRetryCount, maxMqttRetries);
+    DEBUG_PRINTF("  Buffer Size: %d bytes\n", MQTT_MAX_PACKET_SIZE);
+  }
+  
+  DEBUG_PRINTF("System Health:\n");
+  DEBUG_PRINTF("  Free Heap: %d bytes\n", ESP.getFreeHeap());
+  DEBUG_PRINTF("  Uptime: %lu minutes\n", millis() / 60000);
+  DEBUG_PRINTF("  Message Queue: %d/%d\n", queueCount, MAX_OFFLINE_QUEUE_SIZE);
+  DEBUG_PRINTF("  Consultation Queue: %d/%d\n", consultationQueueSize, MAX_CONSULTATION_QUEUE_SIZE);
+  DEBUG_PRINTF("  Time Sync: %s\n", ntpSyncStatus.c_str());
+  DEBUG_PRINTLN("==============================");
+}
+
+void publishConnectionDiagnostics() {
+  if (!mqttConnected) return;
+  
+  String topic = String("consultease/faculty/") + String(FACULTY_ID) + "/diagnostics";
+  
+  String payload = "{";
+  payload += "\"faculty_id\":" + String(FACULTY_ID) + ",";
+  payload += "\"timestamp\":" + String(millis()) + ",";
+  payload += "\"wifi_rssi\":" + String(currentWifiRSSI) + ",";
+  payload += "\"wifi_stable\":" + String(wifiConnectionStable ? "true" : "false") + ",";
+  payload += "\"mqtt_stable\":" + String(mqttConnectionStable ? "true" : "false") + ",";
+  payload += "\"wifi_retries\":" + String(wifiRetryCount) + ",";
+  payload += "\"mqtt_retries\":" + String(mqttRetryCount) + ",";
+  payload += "\"free_heap\":" + String(ESP.getFreeHeap()) + ",";
+  payload += "\"queue_size\":" + String(queueCount) + ",";
+  payload += "\"consultation_queue_size\":" + String(consultationQueueSize) + ",";
+  payload += "\"system_uptime\":" + String(millis()) + ",";
+  payload += "\"ntp_status\":\"" + ntpSyncStatus + "\"";
+  payload += "}";
+  
+  bool success = mqttClient.publish(topic.c_str(), payload.c_str(), false);
+  DEBUG_PRINTF("📊 Diagnostics published: %s\n", success ? "SUCCESS" : "FAILED");
 }
 
 // ================================
@@ -2171,11 +2467,9 @@ void loop() {
   static unsigned long lastSlowOperations = 0;
   if (millis() - lastSlowOperations > 200) { // Increased frequency from 500ms to 200ms
     
+    // Enhanced connection checking with robust reconnection
     checkWiFiConnection();
-
-    if (wifiConnected && !mqttClient.connected()) {
-      connectMQTT();
-    }
+    checkMQTTConnection();
 
     // Update offline queue system
     updateOfflineQueue();
@@ -2217,6 +2511,16 @@ void loop() {
   if (millis() - lastTimeSyncCheck > 60000) { // Increased from 30 seconds to 60 seconds
     checkPeriodicTimeSync();
     lastTimeSyncCheck = millis();
+  }
+
+  // Connection diagnostics every 10 minutes
+  static unsigned long lastDiagnostics = 0;
+  if (millis() - lastDiagnostics > 600000) { // 10 minutes
+    printConnectionDiagnostics();
+    if (mqttConnected) {
+      publishConnectionDiagnostics();
+    }
+    lastDiagnostics = millis();
   }
 
   // Simple animation toggle every 1000ms (reduced frequency)

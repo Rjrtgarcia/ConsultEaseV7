@@ -45,12 +45,33 @@
 #define BLE_GRACE_PERIOD_MS 60000           // 1 minute grace period
 #define BLE_RECONNECT_ATTEMPT_INTERVAL 5000 // Reconnect every 5s
 
-// Network timeouts
-#define WIFI_CONNECT_TIMEOUT 20000          // 20 seconds
+// Enhanced Network timeouts for robust connectivity
+#define WIFI_CONNECT_TIMEOUT 30000          // 30 seconds initial connection
 #define WIFI_RECONNECT_INTERVAL 5000        // 5 seconds between WiFi reconnect attempts
-#define MQTT_KEEPALIVE 60                   // 60 seconds
+#define MQTT_CONNECT_TIMEOUT 15000          // 15 seconds MQTT connection timeout
+#define MQTT_KEEPALIVE 60                   // 60 seconds MQTT keepalive
 #define MQTT_QOS 1                          // MQTT Quality of Service
 #define MQTT_CLIENT_ID "Faculty_Desk_Unit_" TOSTRING(FACULTY_ID) // MQTT client identifier
+
+// Enhanced NTP Settings
+#define NTP_SERVER_PRIMARY "pool.ntp.org"
+#define NTP_SERVER_SECONDARY "time.nist.gov"
+#define NTP_SERVER_TERTIARY "time.google.com"
+#define NTP_SYNC_TIMEOUT 30000              // 30 seconds for NTP sync
+#define NTP_RETRY_INTERVAL 60000            // 1 minute between NTP retries
+#define NTP_UPDATE_INTERVAL 3600000         // 1 hour between periodic syncs
+#define NTP_MAX_RETRIES 5
+#define TIME_ZONE_OFFSET 8                  // UTC+8 for Philippines
+
+// Connection Quality Monitoring
+#define MIN_WIFI_SIGNAL_STRENGTH -80        // Minimum acceptable RSSI in dBm
+#define CONNECTION_STABILITY_TIME 30000     // Time to consider connection stable (30s)
+#define HEARTBEAT_INTERVAL 300000           // 5 minutes between heartbeat messages
+
+// Enhanced Message Handling
+#define MAX_MESSAGE_LENGTH 512              // Maximum message length
+#define MESSAGE_DISPLAY_TIME 30000          // 30 seconds message display
+#define MAX_OFFLINE_QUEUE_SIZE 20           // Maximum queued messages when offline
 
 // UI timing
 #define BUTTON_DEBOUNCE_DELAY 20            // 20ms button debounce
@@ -121,19 +142,7 @@
 // ===== SYSTEM SETTINGS =====
 #define ENABLE_SERIAL_DEBUG true
 #define SERIAL_BAUD_RATE 115200
-#define MAX_MESSAGE_LENGTH 512
 #define MQTT_MAX_PACKET_SIZE 1024    // Increased for larger payloads
-#define HEARTBEAT_INTERVAL 300000    // 5 minutes
-#define TIME_ZONE_OFFSET 8           // GMT+8 Philippines
-
-// ===== NTP SERVERS =====
-#define NTP_SERVER_PRIMARY "pool.ntp.org"
-#define NTP_SERVER_SECONDARY "time.nist.gov"
-#define NTP_SERVER_TERTIARY "time.google.com"
-#define NTP_SYNC_TIMEOUT 10000        // 10 seconds
-#define NTP_UPDATE_INTERVAL 7200000   // 2 hours
-#define NTP_RETRY_INTERVAL 30000      // 30 seconds
-#define NTP_MAX_RETRIES 3             // Maximum retries
 
 // ===== ADVANCED BLE SETTINGS (OPTIONAL) =====
 #define BLE_SCAN_DURATION_QUICK 1

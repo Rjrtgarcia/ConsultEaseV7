@@ -8,14 +8,38 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QComboBox, QMessageBox, QTabWidget, QTableWidget,
                             QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
                             QSizePolicy, QProgressBar, QApplication)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QThread, QObject
 from PyQt5.QtGui import QColor
 
 import logging
 import time
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+class ConsultationWorker(QObject):
+    """
+    Worker class for loading consultations in a separate thread.
+    """
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+    progress = pyqtSignal(int)
+
+    def __init__(self, load_function):
+        super().__init__()
+        self.load_function = load_function
+
+    def run(self):
+        """
+        Run the consultation loading function.
+        """
+        try:
+            result = self.load_function(self.progress)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
 class ConsultationRequestForm(QFrame):
     """
@@ -603,80 +627,81 @@ class ConsultationHistoryPanel(QFrame):
 
     def refresh_consultations(self):
         """
-        Refresh the consultation history from the database with loading indicator.
+        Refresh the consultation list from the database.
         """
         if not self.student:
+            logger.warning("Cannot refresh consultations - no student set")
             return
 
-        # Get student ID from either object or dictionary
-        if isinstance(self.student, dict):
-            student_id = self.student.get('id')
-        else:
-            # Legacy support for student objects
-            student_id = getattr(self.student, 'id', None)
+        # Add debug logging
+        student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
+        logger.info(f"🔄 REFRESHING CONSULTATIONS for student {student_id}")
 
-        if not student_id:
-            return
+        # Clear existing consultations
+        self.consultations.clear()
 
-        try:
-            # Import notification utilities
-            from ..utils.notification import LoadingDialog, NotificationManager
+        # Show loading state
+        self.consultation_table.setRowCount(0)
+        self.consultation_table.setItem(0, 0, QTableWidgetItem("Loading consultations..."))
 
-            # Define the operation to run with progress updates
-            def load_consultations(progress_callback):
-                # Import consultation controller
-                from ..controllers import ConsultationController
-
-                # Update progress
-                progress_callback(10, "Connecting to database...")
-
-                # Get consultation controller
-                consultation_controller = ConsultationController()
-
-                # Update progress
-                progress_callback(30, "Fetching consultation data...")
-
-                # Get consultations for this student
-                consultations = consultation_controller.get_consultations(student_id=student_id)
-
-                # Update progress
-                progress_callback(80, "Processing results...")
-
-                # Simulate a short delay for better UX
-                time.sleep(0.5)
-
-                # Update progress
-                progress_callback(100, "Complete!")
-
-                return consultations
-
-            # Show loading dialog while fetching consultations
-            self.consultations = LoadingDialog.show_loading(
-                self,
-                load_consultations,
-                title="Refreshing Consultations",
-                message="Loading your consultation history...",
-                cancelable=True
-            )
-
-            # Update the table with the results
-            self.update_consultation_table()
-
-        except Exception as e:
-            logger.error(f"Error refreshing consultations: {str(e)}")
+        def load_consultations(progress_callback):
+            # Import consultation controller
+            from ..controllers.consultation_controller import ConsultationController
+            consultation_controller = ConsultationController()
 
             try:
-                # Use notification manager if available
-                from ..utils.notification import NotificationManager
-                NotificationManager.show_message(
-                    self,
-                    "Error",
-                    f"Failed to refresh consultation history: {str(e)}",
-                    NotificationManager.ERROR
-                )
-            except ImportError:
-                # Fallback to basic message box
-                QMessageBox.warning(self, "Error", f"Failed to refresh consultation history: {str(e)}")
+                # Get consultations for the current student
+                consultations = consultation_controller.get_consultations_by_student(student_id)
+                logger.info(f"📊 CONSULTATION REFRESH - Found {len(consultations)} consultations for student {student_id}")
+                
+                # Log details of each consultation
+                for i, consultation in enumerate(consultations):
+                    logger.debug(f"   Consultation {i+1}: ID={consultation.id}, Status={consultation.status.value}, Faculty={consultation.faculty_id}, Created={consultation.created_at}")
+                
+                progress_callback.emit(100)
+                return consultations
+            except Exception as e:
+                logger.error(f"❌ CONSULTATION REFRESH ERROR: {e}")
+                import traceback
+                logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                raise e
+
+        def on_consultations_loaded(consultations):
+            """Handle successful consultation loading."""
+            try:
+                logger.info(f"✅ CONSULTATION LOAD SUCCESS - Processing {len(consultations)} consultations")
+                self.consultations = consultations
+                self.update_consultation_table()
+                logger.info(f"✅ CONSULTATION TABLE UPDATED with {len(consultations)} rows")
+            except Exception as e:
+                logger.error(f"❌ Error updating consultation table: {e}")
+                import traceback
+                logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+        def on_consultations_error(error):
+            """Handle consultation loading error."""
+            logger.error(f"❌ CONSULTATION LOAD FAILED: {error}")
+            self.consultation_table.setRowCount(1)
+            self.consultation_table.setItem(0, 0, QTableWidgetItem("Error loading consultations"))
+
+        # Use QThread for non-blocking database access
+        self.worker_thread = QThread()
+        self.worker = ConsultationWorker(load_consultations)
+        self.worker.moveToThread(self.worker_thread)
+
+        # Connect signals
+        self.worker.finished.connect(on_consultations_loaded)
+        self.worker.error.connect(on_consultations_error)
+        self.worker.progress.connect(lambda: None)  # Progress indicator if needed
+
+        # Clean up thread when done
+        self.worker.finished.connect(self.worker_thread.quit)
+        self.worker.error.connect(self.worker_thread.quit)
+        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
+
+        # Start the worker
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker_thread.start()
 
     def update_consultation_table(self):
         """
@@ -873,6 +898,9 @@ class ConsultationHistoryPanel(QFrame):
             from ..services.async_mqtt_service import get_async_mqtt_service
             from ..utils.mqtt_utils import subscribe_to_topic
             
+            # Get the async MQTT service
+            mqtt_service = get_async_mqtt_service()
+            
             # Subscribe to faculty response topics using the centralized service
             topics = [
                 "consultease/faculty/+/responses",
@@ -884,15 +912,69 @@ class ConsultationHistoryPanel(QFrame):
             
             for topic in topics:
                 try:
-                    subscribe_to_topic(topic, self._handle_mqtt_message_safe)
-                    logger.debug(f"Subscribed to MQTT topic: {topic}")
+                    # Register topic handler directly with the MQTT service
+                    mqtt_service.register_topic_handler(topic, self._handle_mqtt_message_safe)
+                    logger.debug(f"Registered MQTT topic handler: {topic}")
                 except Exception as e:
-                    logger.error(f"Failed to subscribe to topic {topic}: {e}")
+                    logger.error(f"Failed to register topic handler {topic}: {e}")
                     
+            # Also register with the faculty response controller
+            from ..controllers.faculty_response_controller import get_faculty_response_controller
+            faculty_controller = get_faculty_response_controller()
+            faculty_controller.register_callback(self._handle_faculty_response_callback)
+            
             logger.info("MQTT monitoring started for consultation updates using centralized service")
                 
         except Exception as e:
             logger.error(f"Failed to setup MQTT monitoring: {e}")
+
+    def _handle_faculty_response_callback(self, response_data):
+        """
+        Handle faculty response callbacks from the faculty response controller.
+        
+        Args:
+            response_data: Faculty response data including consultation updates
+        """
+        try:
+            # Schedule GUI update in main thread
+            QTimer.singleShot(0, lambda: self._process_faculty_callback(response_data))
+        except Exception as e:
+            logger.error(f"Error handling faculty response callback: {e}")
+
+    def _process_faculty_callback(self, response_data):
+        """
+        Process faculty response callback in the main thread.
+        
+        Args:
+            response_data: Faculty response data
+        """
+        try:
+            if not self.student:
+                return
+                
+            student_id = self.student.get('id') if isinstance(self.student, dict) else getattr(self.student, 'id', None)
+            
+            consultation_id = response_data.get('consultation_id') or response_data.get('message_id')
+            response_type = response_data.get('response_type', '')
+            faculty_name = response_data.get('faculty_name', 'Unknown Faculty')
+            callback_student_id = response_data.get('student_id')
+            
+            logger.info(f"🔄 Processing faculty callback - Student: {student_id}, Consultation: {consultation_id}, Response: {response_type}")
+            
+            # Check if this response is for the current student
+            if callback_student_id and str(callback_student_id) == str(student_id):
+                logger.info(f"✅ Faculty response matches current student - showing notification and refreshing")
+                
+                # Show immediate notification
+                self.show_faculty_response_notification(response_type, faculty_name)
+                
+                # Refresh consultations after a short delay to ensure database is updated
+                QTimer.singleShot(1500, self.refresh_consultations)
+                
+        except Exception as e:
+            logger.error(f"Error processing faculty callback: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     def _handle_mqtt_message_safe(self, topic: str, data):
         """

@@ -1115,6 +1115,7 @@ class DashboardWindow(BaseWindow):
         Refresh faculty status with improved error handling, caching, and adaptive refresh logic.
         """
         try:
+            logger.info(f"🔥🔥🔥 refresh_faculty_status CALLED")
             current_time = time.time()
             
             # Implement adaptive refresh intervals based on activity
@@ -1131,6 +1132,7 @@ class DashboardWindow(BaseWindow):
 
             # Get all faculty
             faculties = faculty_controller.get_all_faculty()
+            logger.info(f"🔥🔥🔥 refresh_faculty_status got {len(faculties) if faculties else 0} faculty members")
 
             # Convert to safe faculty data format and generate hash for change detection
             safe_faculties = []
@@ -1149,13 +1151,15 @@ class DashboardWindow(BaseWindow):
                 # Create string for hash comparison
                 faculty_data_str += f"{faculty.id}:{faculty.name}:{faculty.status}:{faculty.department};"
 
+            logger.info(f"🔥🔥🔥 Faculty data: {safe_faculties}")
+
             # Generate hash for efficient change detection
             import hashlib
             new_hash = hashlib.md5(faculty_data_str.encode()).hexdigest()
             
             # Check if data has actually changed
             if self._last_faculty_hash == new_hash:
-                logger.debug("Faculty data unchanged, skipping UI update")
+                logger.info("🔥🔥🔥 Faculty data unchanged, skipping UI update")
                 self._consecutive_no_changes += 1
                 
                 # Implement adaptive refresh intervals - slow down if no changes
@@ -1170,6 +1174,7 @@ class DashboardWindow(BaseWindow):
                 return
             
             # Data has changed - reset adaptive logic and update UI
+            logger.info(f"🔥🔥🔥 Faculty data CHANGED - updating UI")
             if self._consecutive_no_changes > 0:
                 # Reset refresh interval to minimum when changes are detected
                 self.refresh_timer.setInterval(self._min_refresh_interval)
@@ -1180,6 +1185,7 @@ class DashboardWindow(BaseWindow):
             self._last_update_time = current_time
 
             # Update the grid using safe method
+            logger.info(f"🔥🔥🔥 Calling populate_faculty_grid_safe with {len(safe_faculties)} faculty")
             self.populate_faculty_grid_safe(safe_faculties)
 
             # Store current faculty data for future comparison
@@ -1194,10 +1200,12 @@ class DashboardWindow(BaseWindow):
             if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
                 self.faculty_scroll.verticalScrollBar().setValue(0)
 
-            logger.debug(f"Faculty status refreshed successfully with {len(safe_faculties)} faculty members")
+            logger.info(f"🔥🔥🔥 Faculty status refreshed successfully with {len(safe_faculties)} faculty members")
 
         except Exception as e:
-            logger.error(f"Error refreshing faculty status: {str(e)}")
+            logger.error(f"🔥🔥🔥 Error refreshing faculty status: {str(e)}")
+            import traceback
+            logger.error(f"🔥🔥🔥 Traceback: {traceback.format_exc()}")
             self._show_error_message(f"Failed to refresh faculty list: {str(e)}")
             
             # Reset consecutive changes counter on error to ensure we keep trying
@@ -1596,6 +1604,8 @@ class DashboardWindow(BaseWindow):
         try:
             from ..utils.mqtt_utils import subscribe_to_topic
             
+            logger.info(f"🔥🔥🔥 DASHBOARD setup_realtime_updates CALLED")
+            
             # Subscribe to faculty status updates using the centralized utils
             topics = [
                 "consultease/faculty/+/status",  # ✅ PRIMARY: What desk units actually publish to
@@ -1605,16 +1615,23 @@ class DashboardWindow(BaseWindow):
                 "consultease/system/notifications",  # System-wide notifications
             ]
             
+            logger.info(f"🔥🔥🔥 DASHBOARD subscribing to topics: {topics}")
+            
             for topic in topics:
                 try:
-                    subscribe_to_topic(topic, self.handle_realtime_status_update)
-                    logger.debug(f"Subscribed to topic: {topic}")
+                    logger.info(f"🔥🔥🔥 DASHBOARD subscribing to topic: {topic}")
+                    result = subscribe_to_topic(topic, self.handle_realtime_status_update)
+                    logger.info(f"🔥🔥🔥 DASHBOARD subscription result for {topic}: {result}")
                 except Exception as e:
-                    logger.error(f"Failed to subscribe to topic {topic}: {e}")
+                    logger.error(f"🔥🔥🔥 DASHBOARD failed to subscribe to topic {topic}: {e}")
+                    import traceback
+                    logger.error(f"🔥🔥🔥 DASHBOARD subscription traceback: {traceback.format_exc()}")
                     
-            logger.info("Set up real-time faculty status subscriptions")
+            logger.info("🔥🔥🔥 DASHBOARD completed real-time faculty status subscriptions")
         except Exception as e:
-            logger.error(f"Error setting up real-time updates: {e}")
+            logger.error(f"🔥🔥🔥 DASHBOARD error setting up real-time updates: {e}")
+            import traceback
+            logger.error(f"🔥🔥🔥 DASHBOARD setup traceback: {traceback.format_exc()}")
 
     def cleanup_realtime_updates(self):
         """
@@ -1649,6 +1666,9 @@ class DashboardWindow(BaseWindow):
         """
         Handle real-time status updates from MQTT with thread-safe GUI updates.
         """
+        # Add debugging to confirm this method is being called
+        logger.info(f"🔥🔥🔥 DASHBOARD handle_realtime_status_update CALLED - Topic: {topic}, Data: {data}")
+        
         # Schedule the actual processing in the main thread to prevent Qt threading violations
         QTimer.singleShot(0, lambda: self._process_realtime_status_update(topic, data))
 
@@ -1657,7 +1677,7 @@ class DashboardWindow(BaseWindow):
         Process real-time status updates in the main thread.
         """
         try:
-            logger.info(f"🔥 DASHBOARD - Received real-time update: {topic} -> {data}")
+            logger.info(f"🔥🔥🔥 DASHBOARD _process_realtime_status_update CALLED - Topic: {topic}, Data: {data}")
             
             # Parse topic to understand what changed
             topic_parts = topic.split('/')
@@ -1672,17 +1692,17 @@ class DashboardWindow(BaseWindow):
                         status = data.get('status', 'UNKNOWN')
                         detailed_status = data.get('detailed_status', status)
                         
-                        logger.info(f"🔥 Faculty {faculty_id} status update: present={present}, status={status}")
+                        logger.info(f"🔥🔥🔥 Faculty {faculty_id} status update: present={present}, status={status}")
                         
                         # Trigger faculty grid refresh to update availability
-                        logger.info("🔥 Triggering faculty grid refresh due to status change")
+                        logger.info("🔥🔥🔥 Triggering faculty grid refresh due to status change")
                         self._debounced_refresh()
                         
                     else:
-                        logger.warning(f"🔥 Unexpected data format for faculty status: {type(data)}")
+                        logger.warning(f"🔥🔥🔥 Unexpected data format for faculty status: {type(data)}")
                         
                 except (IndexError, ValueError) as e:
-                    logger.error(f"🔥 Error parsing faculty ID from topic {topic}: {e}")
+                    logger.error(f"🔥🔥🔥 Error parsing faculty ID from topic {topic}: {e}")
                     
             elif len(topic_parts) >= 3:
                 entity_type = topic_parts[0]  # faculty or consultation
@@ -1691,12 +1711,12 @@ class DashboardWindow(BaseWindow):
                 
                 if entity_type == "faculty":
                     # Legacy faculty status changed - trigger a minimal refresh
-                    logger.info(f"🔥 Legacy faculty {entity_id} {update_type} changed")
+                    logger.info(f"🔥🔥🔥 Legacy faculty {entity_id} {update_type} changed")
                     self._debounced_refresh()
                     
                 elif entity_type == "consultation":
                     # Consultation status changed - update consultation panel
-                    logger.info(f"🔥 Consultation {entity_id} status changed")
+                    logger.info(f"🔥🔥🔥 Consultation {entity_id} status changed")
                     if hasattr(self, 'consultation_panel'):
                         self.consultation_panel.refresh_history()
                         
@@ -1704,19 +1724,21 @@ class DashboardWindow(BaseWindow):
                 # System-wide notifications
                 if isinstance(data, dict) and data.get('type') == 'faculty_status':
                     faculty_id = data.get('faculty_id')
-                    logger.info(f"🔥 System notification: Faculty {faculty_id} status changed")
+                    logger.info(f"🔥🔥🔥 System notification: Faculty {faculty_id} status changed")
                     self._debounced_refresh()
                     
         except Exception as e:
-            logger.error(f"🔥 Error handling real-time status update: {e}")
+            logger.error(f"🔥🔥🔥 Error handling real-time status update: {e}")
             import traceback
-            logger.error(f"🔥 Traceback: {traceback.format_exc()}")
+            logger.error(f"🔥🔥🔥 Traceback: {traceback.format_exc()}")
 
     def _debounced_refresh(self):
         """
         Handle the debounced refresh signal to prevent spam updates.
         """
+        logger.info(f"🔥🔥🔥 _debounced_refresh CALLED")
         # Cancel any pending refresh
         self._refresh_debounce_timer.stop()
         # Schedule a new refresh after a short delay
         self._refresh_debounce_timer.start(500)  # 500ms debounce
+        logger.info(f"🔥🔥🔥 _debounced_refresh scheduled refresh in 500ms")
