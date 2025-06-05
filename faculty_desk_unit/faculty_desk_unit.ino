@@ -332,6 +332,7 @@ void processNextQueuedConsultation() {
   if (isConsultationQueueEmpty()) {
     DEBUG_PRINTLN("📭 No more consultations in queue");
     currentMessageDisplayed = false;
+    g_receivedConsultationId = ""; // Clear global ID when queue is empty
     updateMainDisplay(); // Return to normal display
     return;
   }
@@ -342,8 +343,10 @@ void processNextQueuedConsultation() {
   if (nextMessage.isValid) {
     displayQueuedConsultation(nextMessage);
   } else {
-    DEBUG_PRINTLN("❌ Invalid consultation retrieved from queue");
-    processNextQueuedConsultation(); // Try next message
+    DEBUG_PRINTLN("❌ Invalid consultation retrieved from queue (already processed or cancelled), trying next.");
+    // If we retrieved an invalid message, it means getNextConsultationFromQueue already handled it (skipped or queue became empty).
+    // So, we call processNextQueuedConsultation again to fetch a valid one or update display if empty.
+    processNextQueuedConsultation(); 
   }
 }
 
@@ -1467,8 +1470,29 @@ void showResponseConfirmation(String confirmText, uint16_t color) {
   delay(CONFIRMATION_DISPLAY_TIME);
 }
 
+void displayTemporaryMessage(String msgText, uint16_t textColor, uint16_t bgColor, int durationMs) {
+  DEBUG_PRINTF("📺 Displaying temporary message: '%s'\n", msgText.c_str());
+  tft.fillRect(0, MAIN_AREA_Y, SCREEN_WIDTH, MAIN_AREA_HEIGHT, COLOR_WHITE); // Clear main area
+  
+  // Simple centered text
+  int textX = getCenterX(msgText, 2);
+  int textY = MAIN_AREA_Y + (MAIN_AREA_HEIGHT / 2) - 10; // Roughly center vertically
+  
+  tft.setCursor(textX, textY);
+  tft.setTextSize(2);
+  tft.setTextColor(textColor);
+  // tft.fillRect(textX -10, textY - 10, msgText.length() * 12 + 20, 30, bgColor); // Optional background box
+  tft.print(msgText);
+  
+  delay(durationMs);
+  // After delay, process next or update main display
+  // if currentMessageDisplayed is false (meaning the cancelled one was the one showing)
+  // processNextQueuedConsultation will take care of showing next or default screen
+  // if another message was showing, this temporary message will be overwritten by the main loop's updateMainDisplay() or next message display
+}
+
 void clearCurrentMessage() {
-  DEBUG_PRINTLN("📱 Consultation message dismissed via physical button");
+  DEBUG_PRINTLN("📱 Consultation message dismissed or cancelled");
   currentMessage = "";
   messageDisplayed = false;
   messageDisplayStart = 0;
@@ -1948,64 +1972,143 @@ void checkMQTTConnection() {
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  DEBUG_PRINTF("📨 onMqttMessage called - Topic: %s, Length: %d\n", topic, length);
-  
-  // Bounds checking for security
-  if (length > MAX_MESSAGE_LENGTH) {
-    DEBUG_PRINTF("⚠️ Message too long (%d bytes), truncating to %d\n", length, MAX_MESSAGE_LENGTH);
-    length = MAX_MESSAGE_LENGTH;
-  }
-
-  String messageContent = "";
-  messageContent.reserve(length + 1);  // Pre-allocate memory
-
+  String payloadString = "";
   for (unsigned int i = 0; i < length; i++) {
-    messageContent += (char)payload[i];
+    payloadString += (char)payload[i];
   }
+  DEBUG_PRINTF("📩 MQTT Message Received! Topic: %s\n", topic);
+  DEBUG_PRINTF("   Payload (%d bytes): %s\n", length, payloadString.c_str());
 
-  DEBUG_PRINTF("📨 Message received (%d bytes): %s\n", length, messageContent.c_str());
+  DynamicJsonDocument doc(1024); // Increased size for safety
+  DeserializationError error = deserializeJson(doc, payloadString);
 
-  // Parse Consultation ID (CID) from the message
-  DEBUG_PRINTLN("🔍 Starting CID parsing...");
-  int cidStartIndex = messageContent.indexOf("CID:");
-  DEBUG_PRINTF("   CID: search index = %d\n", cidStartIndex);
-  
-  String parsedConsultationId = "";
-
-  if (cidStartIndex != -1) {
-    cidStartIndex += 4; // Length of "CID:"
-    int cidEndIndex = messageContent.indexOf(" ", cidStartIndex);
-    
-    if (cidEndIndex != -1) {
-      parsedConsultationId = messageContent.substring(cidStartIndex, cidEndIndex);
-    } else {
-      parsedConsultationId = messageContent.substring(cidStartIndex);
-    }
-    DEBUG_PRINTF("🔑 Parsed Consultation ID (CID): '%s'\n", parsedConsultationId.c_str());
-  } else {
-    DEBUG_PRINTLN("⚠️ Consultation ID (CID:) not found in message.");
-    return; // Skip messages without CID
-  }
-  
-  bool facultyPresent = presenceDetector.getPresence();
-  DEBUG_PRINTF("👤 Faculty presence check: %s\n", facultyPresent ? "PRESENT" : "AWAY");
-  
-  if (!facultyPresent) {
-    DEBUG_PRINTLN("📭 Message ignored - Professor is AWAY");
+  if (error) {
+    DEBUG_PRINT("❌ deserializeJson() failed: ");
+    DEBUG_PRINTLN(error.c_str());
     return;
   }
 
-  // NEW QUEUE LOGIC: Check if a message is currently being displayed
-  if (currentMessageDisplayed) {
-    DEBUG_PRINTLN("📥 Message currently displayed, adding new consultation to queue");
-    addConsultationToQueue(messageContent, parsedConsultationId);
-  } else {
-    DEBUG_PRINTLN("📱 No message currently displayed, showing consultation immediately");
+  // Check for action field first (for commands like cancellation)
+  if (doc.containsKey("action")) {
+    String action = doc["action"].as<String>();
+    DEBUG_PRINTF("🎬 Action field detected: %s\n", action.c_str());
+
+    if (action == "CANCEL_CONSULTATION" && doc.containsKey("consultation_id")) {
+      String consultationIdToCancel = doc["consultation_id"].as<String>();
+      DEBUG_PRINTF("🚫 Received CANCEL_CONSULTATION command for CID: %s\n", consultationIdToCancel.c_str());
+      handleConsultationCancellation(consultationIdToCancel);
+      return; // Action handled
+    } else if (action == "PING_REQUEST") {
+       DEBUG_PRINTLN("Received PING_REQUEST, sending PONG_RESPONSE");
+       String responseTopic = String(MQTT_TOPIC_BASE) + "/faculty/" + String(FACULTY_ID) + "/pong";
+       String pongPayload = "{\"faculty_id\": \"" + String(FACULTY_ID) + "\", \"status\": \"PONG_RESPONSE\", \"timestamp\": " + String(millis()) + "}";
+       publishWithQueue(responseTopic.c_str(), pongPayload.c_str(), true);
+       return;
+    }
+    // Add other actions here if needed
+
+  } else if (doc.containsKey("consultation_id") && doc.containsKey("message")) {
+    // Existing logic for new consultation requests
+    const char* consultation_id_char = doc["consultation_id"];
+    const char* message_content_char = doc["message"];
     
-    // Parse and display immediately
-    ConsultationMessage newMessage;
-    parseConsultationMessage(messageContent, parsedConsultationId, newMessage);
-    displayQueuedConsultation(newMessage);
+    // ✅ ENHANCED: Ensure consultation_id and message are not null
+    if (consultation_id_char == nullptr || message_content_char == nullptr) {
+        DEBUG_PRINTLN("❌ MQTT message missing consultation_id or message content.");
+        return;
+    }
+    
+    String consultation_id_str = String(consultation_id_char);
+    String message_content_str = String(message_content_char);
+
+    DEBUG_PRINTF("📬 Received new consultation request: ID=%s\n", consultation_id_str.c_str());
+
+    // Check for duplicate consultation ID before adding to queue
+    bool isDuplicate = false;
+    if (currentMessageDisplayed && g_receivedConsultationId == consultation_id_str) {
+        isDuplicate = true;
+    } else {
+        for (int i = 0; i < MAX_CONSULTATION_QUEUE_SIZE; i++) {
+            if (consultationQueue[i].isValid && consultationQueue[i].consultationId == consultation_id_str) {
+                isDuplicate = true;
+                break;
+            }
+        }
+    }
+
+    if (isDuplicate) {
+        DEBUG_PRINTF("⚠️ Duplicate consultation ID %s received. Ignoring.\n", consultation_id_str.c_str());
+        return;
+    }
+    
+    bool added = addConsultationToQueue(message_content_str, consultation_id_str);
+    if (added && !currentMessageDisplayed) {
+      // If no message is currently displayed, process the queue immediately
+      // This ensures new messages are shown if the screen is idle
+      processNextQueuedConsultation();
+    }
+  } else if (String(topic) == MQTT_TOPIC_BROADCAST && payloadString.indexOf("OTA_UPDATE_AVAILABLE") != -1) {
+      DEBUG_PRINTLN("📡 OTA Update message received!");
+      // Parse payload for OTA URL if needed, e.g. using deserializeJson
+      // For now, just trigger a flag or function call
+      // handleOTAUpdate(payloadString); // Example function
+      // Display message on TFT
+      displayTemporaryMessage("OTA Update Available!", COLOR_ACCENT, COLOR_WHITE, 5000);
+      // TODO: Add robust OTA handling logic here or in a separate function.
+  } else {
+    DEBUG_PRINTLN("❓ Unknown MQTT message format or topic.");
+    DEBUG_PRINTF("   Topic: %s\n", topic);
+    DEBUG_PRINTF("   Payload: %s\n", payloadString.c_str());
+  }
+}
+
+void handleConsultationCancellation(String consultationIdToCancel) {
+  DEBUG_PRINTF("🚫 Handling cancellation for CID: %s\n", consultationIdToCancel.c_str());
+  bool wasCurrentlyDisplayed = false;
+
+  // Check if the cancelled consultation is the one currently displayed
+  if (currentMessageDisplayed && g_receivedConsultationId == consultationIdToCancel) {
+    DEBUG_PRINTF("   Cancelled consultation %s was currently displayed.\n", consultationIdToCancel.c_str());
+    // Clear the current message and trigger display of the next or default screen
+    // clearCurrentMessage() will call processNextQueuedConsultation()
+    clearCurrentMessage(); 
+    wasCurrentlyDisplayed = true;
+  }
+
+  // Remove from queue
+  int initialQueueSize = consultationQueueSize;
+  for (int i = 0; i < MAX_CONSULTATION_QUEUE_SIZE; i++) {
+    // Need to handle circular buffer for head/tail correctly if we physically remove
+    // For now, just mark as invalid. getNextConsultationFromQueue will skip them.
+    int actualIndex = (consultationQueueHead + i) % MAX_CONSULTATION_QUEUE_SIZE;
+    if (consultationQueue[actualIndex].isValid && consultationQueue[actualIndex].consultationId == consultationIdToCancel) {
+      consultationQueue[actualIndex].isValid = false;
+      // Do not decrement consultationQueueSize here, getNextConsultationFromQueue will handle it when skipping.
+      DEBUG_PRINTF("   Marked consultation %s at queue index %d (actual: %d) as invalid for cancellation.\n", 
+                   consultationIdToCancel.c_str(), i, actualIndex);
+      // If we only expect one instance, we can break.
+      // break; 
+    }
+  }
+  // Recalculate actual queue size after marking items invalid
+  int validCount = 0;
+  for(int i=0; i < MAX_CONSULTATION_QUEUE_SIZE; i++) {
+    if(consultationQueue[i].isValid) validCount++;
+  }
+  if (consultationQueueSize != validCount) {
+    DEBUG_PRINTF("   Queue size adjusted after cancellation from %d to %d valid items.\n", consultationQueueSize, validCount);
+    consultationQueueSize = validCount; // Correct the size
+  }
+
+  updateMessageLED(); // Update LED based on new queue state
+
+  if (wasCurrentlyDisplayed) {
+    displayTemporaryMessage("Request Cancelled", COLOR_WARNING, COLOR_WHITE, 3000);
+  } else if (initialQueueSize > consultationQueueSize) {
+    // If it was in queue but not displayed, and successfully marked invalid (size changed)
+    DEBUG_PRINTF("   Consultation %s was in queue and now cancelled.\n", consultationIdToCancel.c_str());
+    // Optionally show a small, non-intrusive notification if desired, or just log.
+    // For now, no visual feedback if it wasn't the displayed message.
   }
 }
 

@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QGridLayout, QScrollArea, QFrame,
                                QLineEdit, QComboBox, QMessageBox, QTextEdit,
                                QSplitter, QApplication, QSizePolicy)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread, QObject, pyqtSlot
 from PyQt5.QtGui import QPixmap
 
 import os
@@ -20,6 +20,40 @@ from ..utils.ui_performance import (
 # Set up logging
 logger = logging.getLogger(__name__)
 
+
+# Worker for fetching faculty data in a background thread
+class FacultyFetcher(QObject):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, faculty_controller):
+        super().__init__()
+        self.faculty_controller = faculty_controller
+        self.running = True
+
+    @pyqtSlot()
+    def run(self):
+        if not self.running: # Check before starting
+            return
+        try:
+            logger.info("FacultyFetcher: Starting to fetch faculty data.")
+            # Assuming get_all_faculty fetches all necessary data without pagination for the dashboard
+            # or handles pagination internally if needed for large datasets.
+            # For simplicity here, fetching all.
+            faculties = self.faculty_controller.get_all_faculty(page_size=1000) # Fetch a large number
+            if self.running: # Check if still running before emitting
+                self.finished.emit(faculties if faculties else [])
+            logger.info(f"FacultyFetcher: Successfully fetched {len(faculties) if faculties else 0} faculties.")
+        except Exception as e:
+            logger.error(f"FacultyFetcher: Error fetching faculty data: {str(e)}")
+            if self.running: # Check if still running
+                self.error.emit(str(e))
+        finally:
+            logger.debug("FacultyFetcher: Run method finished.")
+    
+    def stop(self):
+        logger.info("FacultyFetcher: Stopping.")
+        self.running = False
 
 
 class ConsultationRequestForm(QFrame):
@@ -223,20 +257,32 @@ class DashboardWindow(BaseWindow):
         self.student = student
         self.faculty_list = []
         self.consultation_panel = None
+        self.faculty_card_manager = get_faculty_card_manager()
+        self.faculty_controller = None
+
+        # For background faculty loading
+        self._faculty_fetch_thread = None
+        self._faculty_fetcher = None
+        self._is_initial_load_pending = True
+
+        # Debounce timer for full refreshes (if any)
+        self._refresh_debounce_timer = QTimer(self)
+        self._refresh_debounce_timer.setSingleShot(True)
+        self._refresh_debounce_timer.timeout.connect(self._trigger_background_faculty_refresh)
         
         # Call parent __init__ which will automatically call self.init_ui()
         super().__init__(parent)
         
         # Set up additional initialization after UI is created
-        # Set up real-time consultation status updates after parent initialization
-        self.setup_realtime_updates()
+        # This should be called after faculty_controller is available
+        # self.setup_realtime_updates() # Moved to after controller is set
 
-        # Set up smart refresh manager for optimized faculty status updates
+        # Set up smart refresh manager for optimized faculty status updates (periodic full sync)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(False)
-        self.refresh_timer.timeout.connect(self.refresh_faculty_status)
-        self.refresh_timer.start(300000)  # Increased from 3 minutes to 5 minutes to reduce interruptions
-        
+        self.refresh_timer.timeout.connect(self.request_background_faculty_refresh)
+        self.refresh_timer.start(300000)  # Default 5 minutes, will be adjusted
+
         # Add adaptive refresh logic - reduce frequency when no changes detected
         self._consecutive_no_changes = 0
         self._max_refresh_interval = 600000  # Maximum 10 minutes
@@ -248,16 +294,10 @@ class DashboardWindow(BaseWindow):
         
         # Connect signals with debouncing to prevent spam
         self.request_ui_refresh.connect(self._debounced_refresh)
-        self._refresh_debounce_timer = QTimer(self)
-        self._refresh_debounce_timer.setSingleShot(True)
-        self._refresh_debounce_timer.timeout.connect(self.refresh_faculty_status)
 
         # UI performance utilities
         self.ui_batcher = get_ui_batcher()
         self.widget_state_manager = get_widget_state_manager()
-
-        # Faculty card manager for pooling
-        self.faculty_card_manager = get_faculty_card_manager()
 
         # Track faculty data for efficient comparison
         self._last_faculty_hash = None
@@ -284,373 +324,202 @@ class DashboardWindow(BaseWindow):
 
     def init_ui(self):
         """
-        Initialize the dashboard UI.
+        Initialize the main UI components of the dashboard.
         """
-        # Main layout with splitter
-        main_layout = QVBoxLayout()
+        # Get theme settings (if any)
+        try:
+            from ..utils.theme import ConsultEaseTheme
+            theme = ConsultEaseTheme.get_current_theme()
+        except ImportError:
+            theme = None # Fallback if theme system is not available
 
-        # Header with welcome message and student info - improved styling
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(15)
-        header_layout.setContentsMargins(20, 15, 20, 15)
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        self.setLayout(main_layout)
 
-        if self.student:
-            # Handle both student object and student data dictionary
-            if isinstance(self.student, dict):
-                student_name = self.student.get('name', 'Student')
-            else:
-                # Legacy support for student objects
-                student_name = getattr(self.student, 'name', 'Student')
-            welcome_label = QLabel(f"Welcome, {student_name}")
-        else:
-            welcome_label = QLabel("Welcome to ConsultEase")
-
-        # Enhanced header styling for consistency with admin dashboard
-        welcome_label.setStyleSheet("""
-            QLabel {
-                font-size: 28pt;
-                font-weight: bold;
-                color: #2c3e50;
-                padding: 15px 20px;
-                background-color: #ecf0f1;
-                border-radius: 10px;
-                margin: 10px 0;
-                min-height: 60px;
-            }
-        """)
+        # Header
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        
+        # Welcome message using an environment variable for student name
+        student_name = os.getenv('CONSULTEASE_STUDENT_NAME', self.student.get('name', 'Student') if self.student else 'Student')
+        welcome_text = f"Welcome, {student_name}!"
+        
+        welcome_label = QLabel(welcome_text)
+        welcome_label.setStyleSheet("font-size: 20pt; font-weight: bold; color: #DAA520;")
         header_layout.addWidget(welcome_label)
+        header_layout.addStretch()
 
-        # Logout button - larger size for better usability
+        # Logout button
         logout_button = QPushButton("Logout")
-        logout_button.setFixedSize(90, 35)  # Increased size for better touch interaction
-        logout_button.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border-radius: 6px;
-                font-size: 12pt;  /* Increased font size */
-                font-weight: bold;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-            QPushButton:pressed {
-                background-color: #a82315;
-            }
-        """)
+        logout_button.setStyleSheet("font-size: 12pt; padding: 8px 15px; background-color: #D32F2F; color: white; border-radius: 5px;")
         logout_button.clicked.connect(self.logout)
         header_layout.addWidget(logout_button)
+        
+        main_layout.addWidget(header_widget)
 
-        main_layout.addLayout(header_layout)
+        # Main content area (Splitter: Faculty Grid | Consultation Panel)
+        self.main_splitter = QSplitter(Qt.Horizontal)
 
-        # Main content with faculty grid and consultation form
-        content_splitter = QSplitter(Qt.Horizontal)
+        # Left side: Faculty Grid
+        faculty_grid_container = QWidget()
+        faculty_grid_layout = QVBoxLayout(faculty_grid_container)
+        faculty_grid_layout.setContentsMargins(0,0,0,0)
 
-        # Get screen size to set proportional initial sizes
-        screen_size = QApplication.desktop().screenGeometry()
-        screen_width = screen_size.width()
 
-        # Faculty availability grid
-        faculty_widget = QWidget()
-        faculty_layout = QVBoxLayout(faculty_widget)
-
-        # Search and filter controls in a more touch-friendly layout
-        filter_layout = QHBoxLayout()
-        filter_layout.setSpacing(10)
-
-        # Search input with icon and better styling
-        search_frame = QFrame()
-        search_frame.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                padding: 2px;
-            }
-        """)
-        search_layout = QHBoxLayout(search_frame)
-        search_layout.setContentsMargins(5, 0, 5, 0)
-        search_layout.setSpacing(5)
-
-        search_icon = QLabel()
-        try:
-            search_icon_pixmap = QPixmap("resources/icons/search.png")
-            if not search_icon_pixmap.isNull():
-                search_icon.setPixmap(search_icon_pixmap.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        except:
-            # If icon not available, use text
-            search_icon.setText("🔍")
-
-        search_layout.addWidget(search_icon)
-
+        # Filter and Search Bar
+        filter_search_widget = QWidget()
+        filter_search_layout = QHBoxLayout(filter_search_widget)
+        
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by name or department")
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                border: none;
-                padding: 12px 8px;
-                font-size: 14pt;
-                min-height: 44px;
-                background-color: transparent;
-            }
-            QLineEdit:focus {
-                background-color: #f8f9fa;
-            }
-        """)
+        self.search_input.setPlaceholderText("Search faculty by name or department...")
+        self.search_input.setStyleSheet("padding: 8px; border: 1px solid #ccc; border-radius: 5px; font-size: 11pt;")
         self.search_input.textChanged.connect(self.filter_faculty)
-        search_layout.addWidget(self.search_input)
+        filter_search_layout.addWidget(self.search_input)
 
-        filter_layout.addWidget(search_frame, 3)  # Give search more space
+        self.availability_filter_combo = QComboBox()
+        self.availability_filter_combo.addItems(["All Faculty", "Available Only"])
+        self.availability_filter_combo.setStyleSheet("padding: 8px; border: 1px solid #ccc; border-radius: 5px; font-size: 11pt;")
+        self.availability_filter_combo.currentIndexChanged.connect(self.filter_faculty)
+        filter_search_layout.addWidget(self.availability_filter_combo)
+        
+        refresh_button = QPushButton("Refresh List")
+        refresh_button.setStyleSheet("font-size: 11pt; padding: 8px 12px; background-color: #1976D2; color: white; border-radius: 5px;")
+        refresh_button.clicked.connect(self.request_background_faculty_refresh) # Changed to request background refresh
+        filter_search_layout.addWidget(refresh_button)
 
-        # Filter dropdown with better styling
-        filter_frame = QFrame()
-        filter_frame.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                padding: 2px;
-            }
-        """)
-        filter_inner_layout = QHBoxLayout(filter_frame)
-        filter_inner_layout.setContentsMargins(5, 0, 5, 0)
-        filter_inner_layout.setSpacing(5)
+        faculty_grid_layout.addWidget(filter_search_widget)
+        
+        # Scroll area for faculty cards
+        self.faculty_scroll_area = QScrollArea()
+        self.faculty_scroll_area.setWidgetResizable(True)
+        self.faculty_scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #ffffff; }")
+        
+        self.faculty_grid_widget = QWidget() # Widget to hold the grid layout
+        self.faculty_grid_widget.setStyleSheet("background-color: #ffffff;")
+        self.faculty_grid = QGridLayout(self.faculty_grid_widget)
+        self.faculty_grid.setSpacing(10) 
+        self.faculty_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft) # Align cards to top-left
 
-        filter_label = QLabel("Filter:")
-        filter_label.setStyleSheet("font-size: 12pt;")
-        filter_inner_layout.addWidget(filter_label)
+        self.faculty_scroll_area.setWidget(self.faculty_grid_widget)
+        faculty_grid_layout.addWidget(self.faculty_scroll_area)
+        
+        self.main_splitter.addWidget(faculty_grid_container)
 
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItem("All", None)
-        self.filter_combo.addItem("Available Only", True)
-        self.filter_combo.addItem("Unavailable Only", False)
-        self.filter_combo.setStyleSheet("""
-            QComboBox {
-                border: none;
-                padding: 12px 8px;
-                font-size: 14pt;
-                min-height: 44px;
-                background-color: transparent;
-            }
-            QComboBox:focus {
-                background-color: #f8f9fa;
-            }
-            QComboBox::drop-down {
-                width: 30px;
-                border: none;
-            }
-            QComboBox::down-arrow {
-                width: 12px;
-                height: 12px;
-            }
-        """)
-        self.filter_combo.currentIndexChanged.connect(self.filter_faculty)
-        filter_inner_layout.addWidget(self.filter_combo)
+        # Right side: Consultation Panel
+        self.consultation_panel = ConsultationPanel(student=self.student)
+        self.consultation_panel.consultation_requested.connect(self.handle_consultation_request) # Connect its signal
+        self.consultation_panel.setMinimumWidth(450) # Ensure it has a reasonable minimum width
+        self.consultation_panel.setMaximumWidth(600) # And a maximum
+        
+        self.main_splitter.addWidget(self.consultation_panel)
+        
+        # Set initial splitter sizes (e.g., 60% for faculty grid, 40% for consultation panel)
+        self.main_splitter.setSizes([self.width() * 0.6, self.width() * 0.4] if self.width() > 0 else [600, 400])
+        self.main_splitter.setCollapsible(0, False) # Prevent faculty grid from collapsing
+        self.main_splitter.setCollapsible(1, True)  # Allow consultation panel to be collapsed
 
-        filter_layout.addWidget(filter_frame, 2)  # Give filter less space
 
-        faculty_layout.addLayout(filter_layout)
+        main_layout.addWidget(self.main_splitter)
 
-        # Faculty grid in a scroll area with improved spacing and alignment
-        self.faculty_grid = QGridLayout()
-        self.faculty_grid.setSpacing(15)  # Reduced spacing between cards for better use of space
-        self.faculty_grid.setAlignment(Qt.AlignTop | Qt.AlignHCenter)  # Align to top and center horizontally
-        self.faculty_grid.setContentsMargins(10, 10, 10, 10)  # Reduced margins around the grid
-
-        # Create a scroll area for the faculty grid
-        faculty_scroll = QScrollArea()
-        faculty_scroll.setWidgetResizable(True)
-        faculty_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        faculty_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        faculty_scroll.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollBar:vertical {
-                width: 12px;
-                background: #f0f0f0;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background: #c0c0c0;
-                min-height: 20px;
-                border-radius: 6px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
-
-        # Create a container widget for the faculty grid
-        faculty_scroll_content = QWidget()
-        faculty_scroll_content.setLayout(self.faculty_grid)
-        faculty_scroll_content.setStyleSheet("background-color: transparent;")
-
-        # Set the scroll area widget
-        faculty_scroll.setWidget(faculty_scroll_content)
-
-        # Ensure scroll area starts at the top
-        faculty_scroll.verticalScrollBar().setValue(0)
-
-        # Store the scroll area for later reference
-        self.faculty_scroll = faculty_scroll
-
-        faculty_layout.addWidget(faculty_scroll)
-
-        # Consultation panel with request form and history
-        self.consultation_panel = ConsultationPanel(self.student, self)
-        self.consultation_panel.consultation_requested.connect(self.handle_consultation_request)
-        self.consultation_panel.consultation_cancelled.connect(self.handle_consultation_cancel)
-
-        # Add widgets to splitter
-        content_splitter.addWidget(faculty_widget)
-        content_splitter.addWidget(self.consultation_panel)
-
-        # Set splitter sizes proportionally to screen width
-        content_splitter.setSizes([int(screen_width * 0.6), int(screen_width * 0.4)])
-
-        # Save splitter state when it changes
-        content_splitter.splitterMoved.connect(self.save_splitter_state)
-
-        # Store the splitter for later reference
-        self.content_splitter = content_splitter
-
-        # Try to restore previous splitter state
+        # Restore splitter state after UI is built
         self.restore_splitter_state()
 
-        # Add the splitter to the main layout
-        main_layout.addWidget(content_splitter)
+        # Status bar (optional, for non-modal messages)
+        self.status_bar_label = QLabel("Ready.")
+        self.status_bar_label.setStyleSheet("padding: 5px; background-color: #eeeeee; border-top: 1px solid #cccccc;")
+        main_layout.addWidget(self.status_bar_label)
 
-        # Schedule a scroll to top after the UI is fully loaded
-        QTimer.singleShot(100, self._scroll_faculty_to_top)
+        logger.info("Dashboard UI initialized.")
+        # Initial data load is now handled by showEvent or a dedicated method after controller is set
+        # self._perform_initial_faculty_load() # Moved
 
-        # Set the main layout to a widget and make it the central widget
-        central_widget = QWidget()
-        central_widget.setLayout(main_layout)
-        self.setCentralWidget(central_widget)
+    def set_faculty_controller(self, controller):
+        """Set the faculty controller and perform initial setup requiring it."""
+        logger.info("DashboardWindow: Faculty controller set.")
+        self.faculty_controller = controller
+        # Now that controller is set, setup MQTT and load initial data
+        self.setup_realtime_updates()
+        self._perform_initial_faculty_load()
 
-    def populate_faculty_grid_safe(self, faculty_data_list):
+    def populate_faculty_grid_safe(self, faculty_data_list: list):
         """
-        Populate the faculty grid with faculty cards using safe data dictionaries.
-        Optimized for performance with batch processing.
-
-        Args:
-            faculty_data_list (list): List of faculty data dictionaries
+        Safely populate the faculty grid using PooledFacultyCard.
+        This method expects a list of faculty data dictionaries.
         """
-        # Store faculty data list for later reference
-        self._last_faculty_data_list = faculty_data_list
-        
-        # Log faculty data for debugging
-        logger.info(f"Populating faculty grid (safe) with {len(faculty_data_list) if faculty_data_list else 0} faculty members")
+        logger.info(f"Populating faculty grid with {len(faculty_data_list)} faculty members.")
+        self._clear_faculty_grid_pooled() # Clear existing cards first
 
-        # Temporarily disable updates to reduce flickering and improve performance
-        self.setUpdatesEnabled(False)
+        if not faculty_data_list:
+            self._show_empty_faculty_message()
+            return
 
-        try:
-            # Clear existing grid efficiently using pooled cards
-            self._clear_faculty_grid_pooled()
+        # Update the main faculty list used for filtering
+        # This should store dictionaries if get_all_faculty returns dicts, or convert them
+        self._last_faculty_data_list = faculty_data_list # Assuming faculty_data_list is already list of dicts
 
-            # Handle empty faculty list
-            if not faculty_data_list:
-                logger.info("No faculty members found - showing empty state message")
-                self._show_empty_faculty_message()
-                return
+        # Reset grid layout
+        # While loop to remove all items from the grid layout
+        while self.faculty_grid.count():
+            item = self.faculty_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                # It's managed by FacultyCardManager, so we don't delete here
+                # but ensure it's hidden if not reused immediately
+                widget.hide()
 
-            # Calculate optimal number of columns based on screen width
-            screen_width = QApplication.desktop().screenGeometry().width()
 
-            # Fixed card width (matches the width set in FacultyCard)
-            card_width = 280
+        row, col = 0, 0
+        # Determine number of columns based on available width (e.g., 3-4 cards per row)
+        # This is a simplified example; a more robust solution might use flow layout or recalculate on resize
+        num_columns = max(1, self.faculty_scroll_area.width() // 300) if self.faculty_scroll_area.width() > 0 else 3
 
-            # Grid spacing
-            spacing = 15
+        for faculty_data in faculty_data_list:
+            if not isinstance(faculty_data, dict):
+                logger.warning(f"Skipping faculty item, expected dict, got {type(faculty_data)}")
+                continue
+            
+            # Ensure faculty_data has an 'id'
+            faculty_id = faculty_data.get('id')
+            if faculty_id is None:
+                logger.warning(f"Skipping faculty item due to missing ID: {faculty_data.get('name')}")
+                continue
 
-            # Get the actual width of the faculty grid container
-            grid_container_width = self.faculty_grid.parentWidget().width()
-            if grid_container_width <= 0:
-                grid_container_width = int(screen_width * 0.6)
-
-            # Account for grid margins
-            grid_container_width -= 30
-
-            # Calculate how many cards can fit in a row
-            max_cols = max(1, int(grid_container_width / (card_width + spacing)))
-
-            # Adjust for very small screens
-            if screen_width < 800:
-                max_cols = 1
-
-            # Add faculty cards to grid
-            row, col = 0, 0
-            containers = []
-
-            logger.info(f"Creating faculty cards for {len(faculty_data_list)} faculty members")
-
-            for faculty_data in faculty_data_list:
-                try:
-                    # Validate faculty_data
-                    if not isinstance(faculty_data, dict):
-                        logger.error(f"Invalid faculty_data type: {type(faculty_data)}")
-                        continue
-                        
-                    if 'id' not in faculty_data or 'name' not in faculty_data:
-                        logger.error(f"Missing required fields in faculty_data: {faculty_data}")
-                        continue
-
-                    # Create a container widget to center the card
-                    container = QWidget()
-                    container.setStyleSheet("background-color: transparent;")
-                    container_layout = QHBoxLayout(container)
-                    container_layout.setContentsMargins(0, 0, 0, 0)
-                    container_layout.setAlignment(Qt.AlignCenter)
-
-                    logger.debug(f"Creating card for faculty {faculty_data['name']}: available={faculty_data.get('available', False)}")
-
-                    # Get pooled faculty card
-                    card = self.faculty_card_manager.get_faculty_card(
-                        faculty_data,
-                        consultation_callback=lambda f_data=faculty_data: self.show_consultation_form_safe(f_data)
-                    )
-
-                    # Connect consultation signal if it exists
-                    if hasattr(card, 'consultation_requested'):
-                        # Use faculty_data dictionary instead of faculty object to avoid type mismatch
-                        card.consultation_requested.connect(lambda f_data=faculty_data: self.show_consultation_form_safe(f_data))
-
-                    # Add card to container
-                    container_layout.addWidget(card)
-
-                    # Store container for batch processing
-                    containers.append((container, row, col))
-
+            try:
+                # The consultation callback is show_consultation_form
+                card = self.faculty_card_manager.get_faculty_card(faculty_data, self.show_consultation_form)
+                if card:
+                    self.faculty_grid.addWidget(card, row, col)
                     col += 1
-                    if col >= max_cols:
+                    if col >= num_columns:
                         col = 0
                         row += 1
+                else:
+                    logger.warning(f"Failed to get faculty card for {faculty_data.get('name')}")
+            except Exception as e:
+                logger.error(f"Error creating faculty card for {faculty_data.get('name')}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
-                    logger.debug(f"Successfully created card for faculty {faculty_data['name']}")
 
-                except Exception as e:
-                    faculty_name = faculty_data.get('name', 'Unknown') if isinstance(faculty_data, dict) else 'Unknown'
-                    logger.error(f"Error creating faculty card for {faculty_name}: {e}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    continue
+        # Add stretch to the end to ensure cards align to the top-left
+        self.faculty_grid.setRowStretch(row + 1, 1)
+        self.faculty_grid.setColumnStretch(num_columns, 1)
+        
+        # Update the scroll area
+        self.faculty_grid_widget.adjustSize() # Adjust size of the container widget
+        self.faculty_scroll_area.setWidget(self.faculty_grid_widget) # Re-set widget if necessary
 
-            # Add all containers to the grid at once
-            for container, r, c in containers:
-                self.faculty_grid.addWidget(container, r, c)
+        # Update filter options (if faculty_list contains full objects)
+        # self.consultation_panel.set_faculty_options(self.faculty_list)
+        # Assuming faculty_data_list are dicts; if full objects are needed by consultation_panel, adjust accordingly
+        # For now, ConsultationPanel is likely populated by ConsultationController directly or another mechanism.
 
-            # Log successful population
-            logger.info(f"Successfully populated faculty grid with {len(containers)} faculty cards")
+        logger.info("Faculty grid population complete.")
+        self._scroll_faculty_to_top()
+        self.status_bar_label.setText(f"Displaying {len(faculty_data_list)} faculty members. Last updated: {time.strftime('%I:%M:%S %p')}")
 
-        finally:
-            # Re-enable updates after all changes are made
-            self.setUpdatesEnabled(True)
-
-    def show_consultation_form_safe(self, faculty_data):
+    def show_consultation_form_safe(self, faculty_data: dict):
         """
         Show consultation form using safe faculty data dictionary.
 
@@ -716,24 +585,45 @@ class DashboardWindow(BaseWindow):
 
     def _extract_safe_faculty_data(self, faculty_data_list):
         """
-        Extract relevant data from safe faculty data for comparison.
-
-        Args:
-            faculty_data_list (list): List of faculty data dictionaries
-
-        Returns:
-            str: Hash of faculty data for efficient comparison
+        Convert faculty model objects to a list of dictionaries suitable for UI and caching.
+        Ensures all necessary fields are present with defaults.
         """
-        import hashlib
-        # Create a string representation of all relevant faculty data
-        data_str = ""
-        for f_data in sorted(faculty_data_list, key=lambda x: x['id']):  # Sort for consistent hashing
-            data_str += f"{f_data['id']}:{f_data['name']}:{f_data['status']}:{f_data.get('department', '')};"
+        safe_faculties = []
+        for faculty_obj in faculty_data_list:
+            status_val = getattr(faculty_obj, 'status', False) # Default to False (offline)
+            # Convert common string statuses from DB/model to unified dashboard statuses
+            if isinstance(status_val, str):
+                status_str_lower = status_val.lower()
+                if status_str_lower in ["available", "online", "present"]:
+                    actual_status_for_card = "available"
+                    is_available_bool = True
+                elif status_str_lower in ["busy", "in_consultation"]:
+                    actual_status_for_card = status_str_lower # busy or in_consultation
+                    is_available_bool = False # Cannot request if busy/in_consultation via main button
+                else:
+                    actual_status_for_card = "offline"
+                    is_available_bool = False
+            elif isinstance(status_val, bool):
+                is_available_bool = status_val
+                actual_status_for_card = "available" if status_val else "offline"
+            else: # Default for unknown types
+                is_available_bool = False
+                actual_status_for_card = "offline"
 
-        # Return hash for efficient comparison
-        return hashlib.md5(data_str.encode()).hexdigest()
+            data = {
+                'id': faculty_obj.id,
+                'name': getattr(faculty_obj, 'name', "Unknown Faculty"),
+                'department': getattr(faculty_obj, 'department', "N/A"),
+                'available': is_available_bool, # This is for button enablement
+                'status': actual_status_for_card, # This is for status indicator dot
+                'email': getattr(faculty_obj, 'email', "N/A"),
+                'room': getattr(faculty_obj, 'room_number', "N/A"), # Assuming room_number attribute
+                'image_path': getattr(faculty_obj, 'image_path', None)
+            }
+            safe_faculties.append(data)
+        return safe_faculties
 
-    def populate_faculty_grid(self, faculties):
+    def populate_faculty_grid(self, faculties: list):
         """
         Populate the faculty grid with faculty cards.
         Optimized for performance with batch processing and reduced UI updates.
@@ -925,65 +815,36 @@ class DashboardWindow(BaseWindow):
 
     def _show_loading_indicator(self):
         """
-        Show a loading indicator while faculty data is being fetched.
+        Show a non-modal loading message in the faculty grid area.
         """
-        if self._is_loading:
-            return  # Already showing loading indicator
+        self._clear_faculty_grid_pooled()
+        # Add a QLabel to the grid
+        if not hasattr(self, '_loading_label') or self._loading_label is None:
+            self._loading_label = QLabel("🔄 Loading faculty data, please wait...")
+            self._loading_label.setAlignment(Qt.AlignCenter)
+            self._loading_label.setStyleSheet("font-size: 16pt; color: #888888; padding: 50px;")
+        
+        # Ensure any previous content is cleared if faculty_grid is used directly
+        while self.faculty_grid.count():
+            item = self.faculty_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater() # Or hide() if pooled/managed elsewhere
 
-        self._is_loading = True
-        logger.debug("Showing loading indicator")
-
-        # Create loading widget
-        loading_widget = QWidget()
-        loading_widget.setMinimumHeight(200)
-        loading_layout = QVBoxLayout(loading_widget)
-        loading_layout.setAlignment(Qt.AlignCenter)
-        loading_layout.setSpacing(15)
-
-        # Loading animation (simple text-based)
-        loading_label = QLabel("Loading Faculty Information...")
-        loading_label.setAlignment(Qt.AlignCenter)
-        loading_label.setStyleSheet("""
-            QLabel {
-                font-size: 20px;
-                font-weight: bold;
-                color: #3498db;
-                padding: 20px;
-            }
-        """)
-        loading_layout.addWidget(loading_label)
-
-        # Progress indicator
-        progress_label = QLabel("Please wait while we fetch the latest faculty data...")
-        progress_label.setAlignment(Qt.AlignCenter)
-        progress_label.setWordWrap(True)
-        progress_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                color: #7f8c8d;
-                padding: 10px;
-            }
-        """)
-        loading_layout.addWidget(progress_label)
-
-        # Store reference and add to grid
-        self._loading_widget = loading_widget
-        self.faculty_grid.addWidget(loading_widget, 0, 0, 1, 1)
+        self.faculty_grid.addWidget(self.faculty_label_placeholder if hasattr(self, 'faculty_label_placeholder') else self._loading_label, 0, 0, 1, 3) # Span across columns
+        self._loading_label.show()
+        self.status_bar_label.setText("🔄 Loading faculty data...")
+        logger.debug("Loading indicator shown.")
 
     def _hide_loading_indicator(self):
         """
-        Hide the loading indicator.
+        Hide the non-modal loading message.
         """
-        if not self._is_loading or not self._loading_widget:
-            return
-
-        logger.debug("Hiding loading indicator")
-
-        # Remove loading widget from grid
-        self.faculty_grid.removeWidget(self._loading_widget)
-        self._loading_widget.deleteLater()
-        self._loading_widget = None
-        self._is_loading = False
+        if hasattr(self, '_loading_label') and self._loading_label is not None:
+            self._loading_label.hide()
+            # Optionally remove it from layout if it was added directly
+            # self.faculty_grid.removeWidget(self._loading_label)
+        # The faculty grid will be populated, replacing the label.
+        logger.debug("Loading indicator hidden.")
 
     def _show_error_message(self, error_text):
         """
@@ -1053,21 +914,29 @@ class DashboardWindow(BaseWindow):
 
     def filter_faculty(self):
         """
-        Filter faculty grid based on search text and filter selection.
-        Uses a debounce mechanism to prevent excessive updates.
+        Filter faculty based on search term and availability.
+        Uses the self._last_faculty_data_list which should contain dicts.
         """
-        # Cancel any pending filter operation
-        if hasattr(self, '_filter_timer') and self._filter_timer.isActive():
-            self._filter_timer.stop()
+        if not hasattr(self, '_last_faculty_data_list') or not self._last_faculty_data_list:
+            logger.debug("Filter faculty called but no base data available.")
+            # Optionally trigger a refresh if data is missing
+            # self.request_background_faculty_refresh()
+            return
 
-        # Create a new timer for debouncing
-        if not hasattr(self, '_filter_timer'):
-            self._filter_timer = QTimer(self)
-            self._filter_timer.setSingleShot(True)
-            self._filter_timer.timeout.connect(self._perform_filter)
+        search_term = self.search_input.text().lower()
+        filter_available_only = self.availability_filter_combo.currentText() == "Available Only"
 
-        # Start the timer - will trigger _perform_filter after 300ms
-        self._filter_timer.start(300)
+        filtered_list = []
+        for faculty_data in self._last_faculty_data_list:
+            name_match = search_term in faculty_data.get('name', '').lower()
+            dept_match = search_term in faculty_data.get('department', '').lower()
+            status_match = not filter_available_only or faculty_data.get('status', 'offline').lower() == 'available'
+            
+            if (name_match or dept_match) and status_match:
+                filtered_list.append(faculty_data)
+        
+        logger.debug(f"Filtering complete. Found {len(filtered_list)} matching faculty members.")
+        self.populate_faculty_grid_safe(filtered_list) # Repopulate with dicts
 
     def _perform_filter(self):
         """
@@ -1077,7 +946,7 @@ class DashboardWindow(BaseWindow):
             from ..controllers import FacultyController
             
             filter_text = self.search_input.text().strip().lower()
-            show_available = self.filter_combo.currentData()
+            show_available = self.availability_filter_combo.currentText() == "Available Only"
             
             faculty_controller = FacultyController()
             faculties = faculty_controller.get_all_faculty()
@@ -1112,104 +981,125 @@ class DashboardWindow(BaseWindow):
 
     def refresh_faculty_status(self):
         """
-        Refresh faculty status with improved error handling, caching, and adaptive refresh logic.
+        DEPRECATED in favor of request_background_faculty_refresh.
+        This method is kept for compatibility if directly called but should not be primary.
         """
-        try:
-            logger.info(f"🔥🔥🔥 refresh_faculty_status CALLED")
-            current_time = time.time()
-            
-            # Implement adaptive refresh intervals based on activity
-            time_since_last_update = current_time - self._last_update_time
-            if time_since_last_update < 30:  # Don't refresh too frequently (less than 30 seconds)
-                logger.debug("Skipping refresh - too soon since last update")
-                return
-            
-            # Import faculty controller
-            from ..controllers import FacultyController
+        logger.warning("DEPRECATED: refresh_faculty_status() called. Use request_background_faculty_refresh().")
+        self.request_background_faculty_refresh()
 
-            # Get faculty controller
-            faculty_controller = FacultyController()
+    def request_background_faculty_refresh(self):
+        """
+        Request a faculty list refresh, which will be run in the background.
+        Uses a debounce timer to prevent rapid successive calls.
+        """
+        logger.info("Background faculty refresh requested.")
+        self.status_bar_label.setText("🔄 Requesting faculty list update...")
+        # Debouncer will call _trigger_background_faculty_refresh
+        self._refresh_debounce_timer.start(500) # 500ms debounce time
 
-            # Get all faculty
-            faculties = faculty_controller.get_all_faculty()
-            logger.info(f"🔥🔥🔥 refresh_faculty_status got {len(faculties) if faculties else 0} faculty members")
+    def _trigger_background_faculty_refresh(self):
+        """
+        Actually triggers the background refresh operation.
+        Called by the debounce timer.
+        """
+        logger.info("Triggering background faculty refresh operation.")
+        if not self.faculty_controller:
+            logger.error("Cannot refresh faculty: FacultyController not set.")
+            self.status_bar_label.setText("❌ Error: System not ready for refresh.")
+            return
 
-            # Convert to safe faculty data format and generate hash for change detection
-            safe_faculties = []
-            faculty_data_str = ""
-            for faculty in faculties:
-                faculty_data = {
-                    'id': faculty.id,
-                    'name': faculty.name,
-                    'department': faculty.department,
-                    'available': faculty.status,
-                    'status': 'Available' if faculty.status else 'Unavailable',
-                    'email': faculty.email,
-                    'room': getattr(faculty, 'room', None)
-                }
-                safe_faculties.append(faculty_data)
-                # Create string for hash comparison
-                faculty_data_str += f"{faculty.id}:{faculty.name}:{faculty.status}:{faculty.department};"
+        if self._faculty_fetch_thread and self._faculty_fetch_thread.isRunning():
+            logger.warning("Faculty fetch operation already in progress. Skipping new request.")
+            self.status_bar_label.setText("⏳ Refresh already in progress.")
+            return
 
-            logger.info(f"🔥🔥🔥 Faculty data: {safe_faculties}")
+        self._show_loading_indicator() # Show non-modal loading message
 
-            # Generate hash for efficient change detection
-            import hashlib
-            new_hash = hashlib.md5(faculty_data_str.encode()).hexdigest()
-            
-            # Check if data has actually changed
-            if self._last_faculty_hash == new_hash:
-                logger.info("🔥🔥🔥 Faculty data unchanged, skipping UI update")
-                self._consecutive_no_changes += 1
-                
-                # Implement adaptive refresh intervals - slow down if no changes
-                if self._consecutive_no_changes >= 3:  # After 3 consecutive no-changes
-                    current_interval = self.refresh_timer.interval()
-                    new_interval = min(current_interval * 1.5, self._max_refresh_interval)
-                    if new_interval != current_interval:
-                        self.refresh_timer.setInterval(int(new_interval))
-                        logger.info(f"Adapted refresh interval to {new_interval/1000} seconds due to no changes")
-                
-                self._last_update_time = current_time
-                return
-            
-            # Data has changed - reset adaptive logic and update UI
-            logger.info(f"🔥🔥🔥 Faculty data CHANGED - updating UI")
-            if self._consecutive_no_changes > 0:
-                # Reset refresh interval to minimum when changes are detected
-                self.refresh_timer.setInterval(self._min_refresh_interval)
-                logger.info("Reset refresh interval due to detected changes")
-                
+        # Recreate thread and worker for cleanliness if needed, or manage single instance
+        if self._faculty_fetch_thread and self._faculty_fetch_thread.isRunning():
+             self._faculty_fetcher.stop() # Request previous to stop
+             self._faculty_fetch_thread.quit()
+             self._faculty_fetch_thread.wait(1000) # Wait a bit
+
+        self._faculty_fetch_thread = QThread(self)
+        self._faculty_fetcher = FacultyFetcher(self.faculty_controller)
+        self._faculty_fetcher.moveToThread(self._faculty_fetch_thread)
+
+        self._faculty_fetcher.finished.connect(self._handle_faculty_loaded)
+        self._faculty_fetcher.error.connect(self._handle_faculty_load_error)
+        self._faculty_fetch_thread.started.connect(self._faculty_fetcher.run)
+        # Clean up thread when it finishes
+        self._faculty_fetch_thread.finished.connect(self._faculty_fetch_thread.deleteLater)
+        self._faculty_fetcher.finished.connect(self._faculty_fetch_thread.quit) # Ensure thread quits
+        self._faculty_fetcher.error.connect(self._faculty_fetch_thread.quit)
+
+        logger.info("Starting faculty fetch thread.")
+        self._faculty_fetch_thread.start()
+
+    @pyqtSlot(list)
+    def _handle_faculty_loaded(self, faculty_list_from_worker):
+        """Handles the faculty data once fetched by the background worker."""
+        logger.info(f"Faculty data received from worker: {len(faculty_list_from_worker)} items.")
+        self._hide_loading_indicator()
+
+        # Convert model objects to dictionaries for cards
+        faculty_data_for_cards = self._extract_safe_faculty_data(faculty_list_from_worker)
+        self.faculty_list = faculty_list_from_worker # Store raw model objects if needed elsewhere
+
+        # Check for changes before full repopulation (for adaptive timer)
+        current_data_str = "".join(f"{fd.get('id')}:{fd.get('status')}" for fd in faculty_data_for_cards)
+        new_hash = hashlib.md5(current_data_str.encode()).hexdigest() if current_data_str else None
+
+        if self._last_faculty_hash == new_hash and not self._is_initial_load_pending:
+            logger.info("No changes in faculty data since last refresh.")
+            self._consecutive_no_changes += 1
+            self.status_bar_label.setText(f"Faculty list up-to-date. Last checked: {time.strftime('%I:%M:%S %p')}")
+        else:
+            logger.info("Faculty data has changed or initial load, repopulating grid.")
             self._consecutive_no_changes = 0
+            self.populate_faculty_grid_safe(faculty_data_for_cards) # Pass the list of dicts
             self._last_faculty_hash = new_hash
-            self._last_update_time = current_time
+            # self._last_faculty_data_list is updated within populate_faculty_grid_safe if it's the source of truth
+            # For filtering, ensure self._last_faculty_data_list is updated here if populate doesn't do it.
+            self._last_faculty_data_list = faculty_data_for_cards # Ensure this is updated for filtering
 
-            # Update the grid using safe method
-            logger.info(f"🔥🔥🔥 Calling populate_faculty_grid_safe with {len(safe_faculties)} faculty")
-            self.populate_faculty_grid_safe(safe_faculties)
 
-            # Store current faculty data for future comparison
-            self._last_faculty_data_list = safe_faculties
+        self._last_update_time = time.time()
+        self._is_initial_load_pending = False
 
-            # Also update the consultation panel with the latest faculty options (convert back to objects)
-            if hasattr(self, 'consultation_panel'):
-                self.consultation_panel.set_faculty_options(faculties)
-                logger.debug("Refreshed consultation panel faculty options in refresh_faculty_status")
+        # Adjust refresh timer based on changes
+        if self._consecutive_no_changes >= 3:
+            new_interval = min(self.refresh_timer.interval() * 2, self._max_refresh_interval)
+            self.refresh_timer.setInterval(new_interval)
+            logger.info(f"No changes for {self._consecutive_no_changes} cycles. Refresh interval increased to {new_interval / 1000}s.")
+        else:
+            self.refresh_timer.setInterval(self._min_refresh_interval)
 
-            # Ensure scroll area starts at the top
-            if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
-                self.faculty_scroll.verticalScrollBar().setValue(0)
+        # Clean up worker and thread if they are one-shot per request
+        if self._faculty_fetcher:
+            self._faculty_fetcher.stop() # Signal fetcher to stop if it has loops
+            # self._faculty_fetcher.deleteLater() # Let Qt manage deletion after events processed
+            # self._faculty_fetcher = None
+        # if self._faculty_fetch_thread:
+            # self._faculty_fetch_thread.quit() # Already connected to quit on finish
+            # self._faculty_fetch_thread.wait(500) # Give it a moment
+            # self._faculty_fetch_thread = None
+        logger.info("Finished handling loaded faculty data.")
 
-            logger.info(f"🔥🔥🔥 Faculty status refreshed successfully with {len(safe_faculties)} faculty members")
-
-        except Exception as e:
-            logger.error(f"🔥🔥🔥 Error refreshing faculty status: {str(e)}")
-            import traceback
-            logger.error(f"🔥🔥🔥 Traceback: {traceback.format_exc()}")
-            self._show_error_message(f"Failed to refresh faculty list: {str(e)}")
-            
-            # Reset consecutive changes counter on error to ensure we keep trying
-            self._consecutive_no_changes = 0
+    @pyqtSlot(str)
+    def _handle_faculty_load_error(self, error_message):
+        """Handles errors from the faculty fetcher."""
+        logger.error(f"Error loading faculty data from worker: {error_message}")
+        self._hide_loading_indicator()
+        self._show_error_message(f"Failed to load faculty: {error_message}")
+        self.status_bar_label.setText(f"❌ Error loading faculty: {error_message}")
+        self._is_initial_load_pending = False # Allow next attempt
+         # Clean up worker and thread if they are one-shot per request
+        if self._faculty_fetcher:
+            self._faculty_fetcher.stop()
+        # if self._faculty_fetch_thread:
+        #     self._faculty_fetch_thread.quit()
+        #     self._faculty_fetch_thread.wait(500)
 
     def show_consultation_form(self, faculty_or_id):
         """
@@ -1270,247 +1160,31 @@ class DashboardWindow(BaseWindow):
             logger.error(f"Error loading available faculty for consultation form: {str(e)}")
             self.show_notification("Error preparing consultation form.", "error")
 
-    def handle_consultation_request(self, faculty, message, course_code):
-        """
-        Handle consultation request submission.
-
-        Args:
-            faculty (object): Faculty object
-            message (str): Consultation request message
-            course_code (str): Optional course code
-        """
-        try:
-            # Import consultation controller
-            from ..controllers import ConsultationController
-
-            # Get consultation controller
-            consultation_controller = ConsultationController()
-
-            # Create consultation
-            if self.student:
-                # Get student ID from either object or dictionary
-                if isinstance(self.student, dict):
-                    student_id = self.student.get('id')
-                else:
-                    # Legacy support for student objects
-                    student_id = getattr(self.student, 'id', None)
-
-                if not student_id:
-                    logger.error("Cannot create consultation: student ID not available")
-                    QMessageBox.warning(
-                        self,
-                        "Consultation Request",
-                        "Unable to submit consultation request. Student information is incomplete."
-                    )
-                    return
-
-                consultation = consultation_controller.create_consultation(
-                    student_id=student_id,
-                    faculty_id=faculty.id,
-                    request_message=message,
-                    course_code=course_code
-                )
-
-                if consultation:
-                    # Show confirmation
-                    QMessageBox.information(
-                        self,
-                        "Consultation Request",
-                        f"Your consultation request with {faculty.name} has been submitted."
-                    )
-
-                    # Refresh the consultation history
-                    self.consultation_panel.refresh_history()
-                else:
-                    QMessageBox.warning(
-                        self,
-                        "Consultation Request",
-                        f"Failed to submit consultation request. Please try again."
-                    )
-            else:
-                # No student logged in
-                QMessageBox.warning(
-                    self,
-                    "Consultation Request",
-                    "You must be logged in to submit a consultation request."
-                )
-        except Exception as e:
-            logger.error(f"Error creating consultation: {str(e)}")
-            QMessageBox.warning(
-                self,
-                "Consultation Request",
-                f"An error occurred while submitting your consultation request: {str(e)}"
-            )
-
-    def handle_consultation_cancel(self, consultation_id):
-        """
-        Handle consultation cancellation.
-
-        Args:
-            consultation_id (int): ID of the consultation to cancel
-        """
-        try:
-            # Import consultation controller
-            from ..controllers import ConsultationController
-
-            # Get consultation controller
-            consultation_controller = ConsultationController()
-
-            # Cancel consultation
-            consultation = consultation_controller.cancel_consultation(consultation_id)
-
-            if consultation:
-                # Show confirmation
-                QMessageBox.information(
-                    self,
-                    "Consultation Cancelled",
-                    f"Your consultation request has been cancelled."
-                )
-
-                # Refresh the consultation history
-                self.consultation_panel.refresh_history()
-            else:
-                QMessageBox.warning(
-                    self,
-                    "Consultation Cancellation",
-                    f"Failed to cancel consultation request. Please try again."
-                )
-        except Exception as e:
-            logger.error(f"Error cancelling consultation: {str(e)}")
-            QMessageBox.warning(
-                self,
-                "Consultation Cancellation",
-                f"An error occurred while cancelling your consultation request: {str(e)}"
-            )
-
-    def save_splitter_state(self):
-        """
-        Save the current splitter state to settings.
-        """
-        try:
-            # Import QSettings
-            from PyQt5.QtCore import QSettings
-
-            # Create settings object
-            settings = QSettings("ConsultEase", "Dashboard")
-
-            # Save splitter state
-            settings.setValue("splitter_state", self.content_splitter.saveState())
-            settings.setValue("splitter_sizes", self.content_splitter.sizes())
-
-            logger.debug("Saved splitter state")
-        except Exception as e:
-            logger.error(f"Error saving splitter state: {e}")
-
-    def restore_splitter_state(self):
-        """
-        Restore the splitter state from settings.
-        """
-        try:
-            # Import QSettings
-            from PyQt5.QtCore import QSettings
-
-            # Create settings object
-            settings = QSettings("ConsultEase", "Dashboard")
-
-            # Restore splitter state if available
-            if settings.contains("splitter_state"):
-                state = settings.value("splitter_state")
-                if state:
-                    self.content_splitter.restoreState(state)
-                    logger.debug("Restored splitter state")
-
-            # Fallback to sizes if state restoration fails
-            elif settings.contains("splitter_sizes"):
-                sizes = settings.value("splitter_sizes")
-                if sizes:
-                    self.content_splitter.setSizes(sizes)
-                    logger.debug("Restored splitter sizes")
-        except Exception as e:
-            logger.error(f"Error restoring splitter state: {e}")
-            # Use default sizes as fallback
-            screen_width = QApplication.desktop().screenGeometry().width()
-            self.content_splitter.setSizes([int(screen_width * 0.6), int(screen_width * 0.4)])
-
-    def logout(self):
-        """
-        Handle logout button click.
-        """
-        # Save splitter state before logout
-        self.save_splitter_state()
-
-        self.change_window.emit("login", None)
-
-    def show_notification(self, message, message_type="info"):
-        """
-        Show a notification message to the user using the standardized notification system.
-
-        Args:
-            message (str): Message to display
-            message_type (str): Type of message ('success', 'error', 'warning', or 'info')
-        """
-        try:
-            # Import notification manager
-            from ..utils.notification import NotificationManager
-
-            # Map message types
-            type_mapping = {
-                "success": NotificationManager.SUCCESS,
-                "error": NotificationManager.ERROR,
-                "warning": NotificationManager.WARNING,
-                "info": NotificationManager.INFO
-            }
-
-            # Get standardized message type
-            std_type = type_mapping.get(message_type.lower(), NotificationManager.INFO)
-
-            # Show notification using the manager
-            title = message_type.capitalize()
-            if message_type == "error":
-                title = "Error"
-            elif message_type == "success":
-                title = "Success"
-            elif message_type == "warning":
-                title = "Warning"
-            else:
-                title = "Information"
-
-            NotificationManager.show_message(self, title, message, std_type)
-
-        except ImportError:
-            # Fallback to basic message boxes if notification manager is not available
-            logger.warning("NotificationManager not available, using basic message boxes")
-            if message_type == "success":
-                QMessageBox.information(self, "Success", message)
-            elif message_type == "error":
-                QMessageBox.warning(self, "Error", message)
-            elif message_type == "warning":
-                QMessageBox.warning(self, "Warning", message)
-            else:
-                QMessageBox.information(self, "Information", message)
-
     def _scroll_faculty_to_top(self):
-        """
-        Scroll the faculty grid to the top.
-        This is called after the UI is fully loaded to ensure faculty cards are visible.
-        """
-        if hasattr(self, 'faculty_scroll') and self.faculty_scroll:
-            self.faculty_scroll.verticalScrollBar().setValue(0)
-            logger.debug("Scrolled faculty grid to top")
+        """Scroll the faculty grid to the top."""
+        if self.faculty_scroll_area and self.faculty_scroll_area.verticalScrollBar():
+            self.faculty_scroll_area.verticalScrollBar().setValue(0)
 
     def _clear_faculty_grid_pooled(self):
-        """
-        Clear the faculty grid efficiently using pooled cards.
-        """
-        # Return all active faculty cards to the pool
-        self.faculty_card_manager.clear_all_cards()
+        """Clear all faculty cards from the grid and return them to the pool."""
+        logger.debug("Clearing faculty grid using FacultyCardManager.")
+        # Iterate over grid items, get faculty_id from card, and return to manager
+        for i in reversed(range(self.faculty_grid.count())):
+            item = self.faculty_grid.itemAt(i)
+            if item and item.widget():
+                card = item.widget()
+                if isinstance(card, PooledFacultyCard) and card.faculty_id is not None:
+                    self.faculty_card_manager.return_faculty_card(card.faculty_id)
+                else:
+                    # If it's not a pooled card or ID is missing, just remove/delete
+                    widget = self.faculty_grid.takeAt(i).widget()
+                    if widget: widget.deleteLater()
+            # else: # If item is a spacer or layout, remove it differently if needed
+            #     self.faculty_grid.removeItem(item)
 
-        # Clear the grid layout
-        while self.faculty_grid.count():
-            item = self.faculty_grid.takeAt(0)
-            if item.widget():
-                # Don't delete the widget, it's managed by the pool
-                item.widget().setParent(None)
+        # Fallback: ensure manager knows all cards are cleared if grid manipulation is complex
+        # self.faculty_card_manager.clear_all_cards() # This is more aggressive
+        logger.debug("Faculty grid cleared.")
 
     def showEvent(self, event):
         """
@@ -1533,52 +1207,14 @@ class DashboardWindow(BaseWindow):
 
     def _perform_initial_faculty_load(self):
         """
-        Perform the initial load of faculty data with optimized performance.
+        Perform the initial loading of faculty data.
+        Now uses the background thread mechanism.
         """
-        try:
-            from ..controllers import FacultyController
-
-            faculty_controller = FacultyController()
-            faculties = faculty_controller.get_all_faculty()
-
-            # Convert to safe faculty data format and generate hash
-            safe_faculties = []
-            faculty_data_str = ""
-            for faculty in faculties:
-                faculty_data = {
-                    'id': faculty.id,
-                    'name': faculty.name,
-                    'department': faculty.department,
-                    'available': faculty.status,
-                    'status': 'Available' if faculty.status else 'Unavailable',
-                    'email': faculty.email,
-                    'room': getattr(faculty, 'room', None)
-                }
-                safe_faculties.append(faculty_data)
-                faculty_data_str += f"{faculty.id}:{faculty.name}:{faculty.status}:{faculty.department};"
-
-            if safe_faculties:
-                self.populate_faculty_grid_safe(safe_faculties)
-                self._last_faculty_data_list = safe_faculties
-                
-                # Generate and store initial hash
-                import hashlib
-                self._last_faculty_hash = hashlib.md5(faculty_data_str.encode()).hexdigest()
-                self._last_update_time = time.time()
-                
-                # Update consultation panel options with object versions
-                if hasattr(self, 'consultation_panel'):
-                    self.consultation_panel.set_faculty_options(faculties)
-                    
-                logger.info(f"Initial faculty load completed with {len(safe_faculties)} faculty members")
-            else:
-                self._show_empty_faculty_message()
-
-        except Exception as e:
-            logger.error(f"Error in initial faculty load: {str(e)}")
-            self._show_error_message(f"Failed to load faculty data: {str(e)}")
-        finally:
-            self._hide_loading_indicator()
+        logger.info("Performing initial faculty load using background worker.")
+        self.status_bar_label.setText("🔄 Loading initial faculty data...")
+        self._is_initial_load_pending = True
+        # This will show loading indicator and start the thread via _trigger_background_faculty_refresh
+        self._trigger_background_faculty_refresh()
 
     def closeEvent(self, event):
         """
@@ -1675,58 +1311,92 @@ class DashboardWindow(BaseWindow):
     def _process_realtime_status_update(self, topic, data):
         """
         Process real-time status updates in the main thread.
+        Optimized to update individual cards directly.
         """
         try:
-            logger.info(f"🔥🔥🔥 DASHBOARD _process_realtime_status_update CALLED - Topic: {topic}, Data: {data}")
-            
-            # Parse topic to understand what changed
+            logger.info(f"Dashboard processing MQTT: Topic: {topic}, Data: {data}")
             topic_parts = topic.split('/')
-            
-            if "consultease/faculty" in topic and "status" in topic:
-                # Parse consultease/faculty/{id}/status format
+
+            # Handle primary faculty status topic: consultease/faculty/{id}/status
+            if "consultease/faculty" in topic and topic.endswith("/status") and len(topic_parts) == 4:
                 try:
-                    faculty_id = int(topic_parts[2])  # consultease/faculty/{ID}/status
-                    
+                    faculty_id = int(topic_parts[2])
+                    new_status_str = "offline" # Default status
+
                     if isinstance(data, dict):
-                        present = data.get('present', False)
-                        status = data.get('status', 'UNKNOWN')
-                        detailed_status = data.get('detailed_status', status)
+                        # Enhanced status extraction based on typical desk unit payload
+                        is_present = data.get('present', False) # Desk unit might send 'present'
+                        status_from_payload = data.get('status', 'offline').lower() # And a 'status' string like 'AVAILABLE', 'BUSY'
+                        # detailed_status = data.get('detailed_status', status_from_payload)
+
+                        if is_present:
+                            if status_from_payload == 'busy' or status_from_payload == 'in_consultation':
+                                new_status_str = status_from_payload
+                            else: # present and not explicitly busy -> available
+                                new_status_str = "available"
+                        else: # Not present or no 'present' field
+                            new_status_str = "offline"
                         
-                        logger.info(f"🔥🔥🔥 Faculty {faculty_id} status update: present={present}, status={status}")
+                        logger.info(f"Updating faculty card {faculty_id} to status: {new_status_str} based on payload: {data}")
+                        self.faculty_card_manager.update_faculty_status(faculty_id, new_status_str)
+                        self.status_bar_label.setText(f"Faculty {faculty_id} status updated to {new_status_str}. ({time.strftime('%I:%M:%S %p')})")
+                        # No full refresh needed here, individual card is updated.
+
+                    elif isinstance(data, str): # Handle simple string status like "true", "false", "available", "offline"
+                        status_lower = data.lower()
+                        if status_lower == "true" or status_lower == "available":
+                            new_status_str = "available"
+                        elif status_lower == "false" or status_lower == "offline":
+                            new_status_str = "offline"
+                        elif status_lower == "busy":
+                            new_status_str = "busy"
+                        else:
+                            logger.warning(f"Unknown string status for faculty {faculty_id}: {data}")
+                            new_status_str = "offline" # Default for unknown string
                         
-                        # Trigger faculty grid refresh to update availability
-                        logger.info("🔥🔥🔥 Triggering faculty grid refresh due to status change")
-                        self._debounced_refresh()
-                        
+                        logger.info(f"Updating faculty card {faculty_id} to status: {new_status_str} based on string payload: {data}")
+                        self.faculty_card_manager.update_faculty_status(faculty_id, new_status_str)
+                        self.status_bar_label.setText(f"Faculty {faculty_id} status updated to {new_status_str}. ({time.strftime('%I:%M:%S %p')})")
+
                     else:
-                        logger.warning(f"🔥🔥🔥 Unexpected data format for faculty status: {type(data)}")
+                        logger.warning(f"Unexpected data format for faculty status {faculty_id}: {type(data)}, data: {data}")
                         
                 except (IndexError, ValueError) as e:
-                    logger.error(f"🔥🔥🔥 Error parsing faculty ID from topic {topic}: {e}")
-                    
-            elif len(topic_parts) >= 3:
-                entity_type = topic_parts[0]  # faculty or consultation
-                entity_id = topic_parts[1]
-                update_type = topic_parts[2]  # status or availability
-                
-                if entity_type == "faculty":
-                    # Legacy faculty status changed - trigger a minimal refresh
-                    logger.info(f"🔥🔥🔥 Legacy faculty {entity_id} {update_type} changed")
-                    self._debounced_refresh()
-                    
-                elif entity_type == "consultation":
-                    # Consultation status changed - update consultation panel
-                    logger.info(f"🔥🔥🔥 Consultation {entity_id} status changed")
-                    if hasattr(self, 'consultation_panel'):
-                        self.consultation_panel.refresh_history()
-                        
+                    logger.error(f"Error parsing faculty ID or status from topic {topic}, data {data}: {e}")
+            
+            # Handle legacy faculty status topics (can still trigger a debounced full refresh if necessary)
+            elif "faculty/" in topic and ("/status" in topic or "/availability" in topic):
+                logger.info(f"Legacy faculty status update on topic {topic}. Triggering debounced full refresh.")
+                self._debounced_refresh() # Keep debounced full refresh for less specific legacy topics
+
+            # Handle consultation status updates for the ConsultationPanel
+            elif "consultation/" in topic and "/status" in topic:
+                logger.info(f"Consultation status update on topic {topic}. Refreshing history panel.")
+                if hasattr(self, 'consultation_panel') and self.consultation_panel:
+                    self.consultation_panel.refresh_history() # This is already relatively targeted
+                    # Optionally, show a non-modal notification if the update is for the current student
+                    # This requires parsing student_id from the payload if available
+                    self.show_notification("A consultation status has been updated.", "info") 
+
             elif "consultease/system/notifications" in topic:
-                # System-wide notifications
-                if isinstance(data, dict) and data.get('type') == 'faculty_status':
-                    faculty_id = data.get('faculty_id')
-                    logger.info(f"🔥🔥🔥 System notification: Faculty {faculty_id} status changed")
-                    self._debounced_refresh()
-                    
+                if isinstance(data, dict):
+                    notification_type = data.get('type', 'unknown')
+                    message = data.get('message', 'System notification received.')
+                    level = data.get('level', 'info').lower()
+                    logger.info(f"System notification: Type: {notification_type}, Msg: {message}, Lvl: {level}")
+                    self.show_notification(message, level) # Use dashboard's notification system
+
+                    # If it's a faculty status related system notification, might still do selective update or light refresh
+                    if notification_type == 'faculty_status_changed' and 'faculty_id' in data and 'new_status' in data:
+                        faculty_id = data['faculty_id']
+                        new_status = data['new_status']
+                        logger.info(f"System notification indicates faculty {faculty_id} changed to {new_status}. Updating card.")
+                        self.faculty_card_manager.update_faculty_status(faculty_id, new_status)
+                        self.status_bar_label.setText(f"Faculty {faculty_id} status updated. ({time.strftime('%I:%M:%S %p')})")
+                    elif notification_type == 'general_refresh_request': # Example of a system-wide refresh trigger
+                        logger.info("System notification requests a general UI refresh.")
+                        self.request_background_faculty_refresh()
+                        
         except Exception as e:
             logger.error(f"🔥🔥🔥 Error handling real-time status update: {e}")
             import traceback

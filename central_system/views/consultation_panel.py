@@ -13,8 +13,10 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QComboBox, QMessageBox, QTabWidget, QTableWidget,
                             QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
                             QSizePolicy, QProgressBar, QApplication)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, pyqtSlot
 from PyQt5.QtGui import QColor
+
+from ..models import ConsultationStatus # Import ConsultationStatus
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -663,7 +665,8 @@ class ConsultationHistoryPanel(QFrame):
             self.consultation_table.insertRow(row_position)
 
             # Faculty name
-            faculty_item = QTableWidgetItem(consultation.faculty.name)
+            faculty_name = consultation.faculty.name if hasattr(consultation, 'faculty') and consultation.faculty else "N/A"
+            faculty_item = QTableWidgetItem(faculty_name)
             self.consultation_table.setItem(row_position, 0, faculty_item)
 
             # Course code
@@ -728,73 +731,35 @@ class ConsultationHistoryPanel(QFrame):
             self.consultation_table.setItem(row_position, 3, date_item)
 
             # Actions
-            actions_cell = QWidget()
-            actions_layout = QHBoxLayout(actions_cell)
-            actions_layout.setContentsMargins(8, 8, 8, 8)  # Increased margins for better spacing
-            actions_layout.setSpacing(10)  # Increased spacing between buttons
-            actions_layout.setAlignment(Qt.AlignCenter)  # Ensure proper center alignment
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(5, 0, 5, 0) # Reduced margins
+            actions_layout.setSpacing(5) # Reduced spacing
 
-            # View details button with improved sizing and styling
-            view_button = QPushButton("View")
-            view_button.setFixedSize(60, 32)  # Slightly larger for better touch interaction
-            view_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #4169E1; 
-                    color: white;
-                    border: 2px solid #DAA520;
-                    border-radius: 6px;
-                    font-size: 11pt;
-                    font-weight: bold;
-                    padding: 4px 8px;
-                }
-                QPushButton:hover {
-                    background-color: #1E90FF;
-                    border: 2px solid #FFD700;
-                }
-                QPushButton:pressed {
-                    background-color: #0066CC;
-                    border: 2px solid #B8860B;
-                }
-            """)
-            # Use a better lambda that ignores the checked parameter
-            view_button.clicked.connect(lambda _, c=consultation: self.view_consultation_details(c))
-            actions_layout.addWidget(view_button, 0, Qt.AlignCenter)
+            # View Details Button (example)
+            # view_button = QPushButton("View")
+            # view_button.setStyleSheet("background-color: #17a2b8; font-size: 11pt; padding: 5px;") # Smaller padding
+            # view_button.clicked.connect(lambda _, c=consultation: self.view_consultation_details(c))
+            # actions_layout.addWidget(view_button)
 
-            # Cancel button (only for pending consultations) with improved sizing and styling
-            if consultation.status.value == "pending":
+            # Cancel Button - only if status is PENDING or ACCEPTED
+            if consultation.status in [ConsultationStatus.PENDING, ConsultationStatus.ACCEPTED]:
                 cancel_button = QPushButton("Cancel")
-                cancel_button.setFixedSize(70, 32)  # Slightly larger for better touch interaction
-                cancel_button.setStyleSheet("""
-                    QPushButton {
-                        background-color: #DAA520; 
-                        color: white;
-                        border: 2px solid #4169E1;
-                        border-radius: 6px;
-                        font-size: 11pt;
-                        font-weight: bold;
-                        padding: 4px 8px;
-                    }
-                    QPushButton:hover {
-                        background-color: #FFD700;
-                        border: 2px solid #1E90FF;
-                        color: #333333;
-                    }
-                    QPushButton:pressed {
-                        background-color: #B8860B;
-                        border: 2px solid #0066CC;
-                        color: white;
-                    }
-                """)
-                # Use a better lambda that ignores the checked parameter
-                cancel_button.clicked.connect(lambda _, c=consultation: self.cancel_consultation(c))
-                actions_layout.addWidget(cancel_button, 0, Qt.AlignCenter)
+                cancel_button.setStyleSheet("background-color: #dc3545; font-size: 11pt; padding: 5px;") # Smaller padding
+                # Use a lambda to pass the specific consultation object to the handler
+                cancel_button.clicked.connect(lambda checked, c=consultation: self.cancel_consultation(c))
+                actions_layout.addWidget(cancel_button)
+            else:
+                # Add a placeholder or an empty stretch if no actions applicable for this row, to keep alignment
+                actions_layout.addStretch()
 
-            # Set size policy for proper widget sizing with better height
-            actions_cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            actions_cell.setMinimumHeight(56)  # Increased height for better button visibility and alignment
-            actions_cell.setMaximumHeight(56)  # Fixed height to ensure consistency
+            actions_layout.addStretch() # Ensure buttons are to the left
+            self.consultation_table.setCellWidget(row_position, 4, actions_widget)
 
-            self.consultation_table.setCellWidget(row_position, 4, actions_cell)
+            # Set row height for better visuals with buttons
+            self.consultation_table.setRowHeight(row_position, 55) # Adjusted row height
+
+        self.consultation_table.resizeRowsToContents()
 
     def view_consultation_details(self, consultation):
         """
@@ -1453,7 +1418,7 @@ class ConsultationPanel(QTabWidget):
 
         # History tab with improved icon and text
         self.history_panel = ConsultationHistoryPanel(self.student)
-        self.history_panel.consultation_cancelled.connect(self.handle_consultation_cancel)
+        self.history_panel.consultation_cancelled.connect(self.handle_consultation_cancel_from_history)
         self.addTab(self.history_panel, "Consultation History")
 
         # Set tab icon if available
@@ -1641,6 +1606,17 @@ class ConsultationPanel(QTabWidget):
                     f"Failed to submit consultation request: {str(e)}"
                 )
 
+    @pyqtSlot(int)
+    def handle_consultation_cancel_from_history(self, consultation_id):
+        """
+        Handles the consultation_cancelled signal from ConsultationHistoryPanel.
+        This will then trigger the main cancellation logic in ConsultationPanel.
+        """
+        logger.info(f"ConsultationPanel: Received cancellation request from HistoryPanel for ID {consultation_id}. Forwarding...")
+        # This now calls the main handler which also has confirmation, consider if one confirmation is enough.
+        # For now, ConsultationPanel.handle_consultation_cancel will show its own confirmation.
+        self.handle_consultation_cancel(consultation_id) 
+
     def handle_consultation_cancel(self, consultation_id):
         """
         Handle consultation cancellation with improved feedback.
@@ -1678,9 +1654,9 @@ class ConsultationPanel(QTabWidget):
                 if NotificationManager.show_confirmation(
                     self,
                     "Cancel Consultation",
-                    "Are you sure you want to cancel this consultation request?",
-                    "Yes, Cancel",
-                    "No, Keep It"
+                    "Are you sure you want to cancel this consultation request? This action cannot be undone.", # Made message more specific
+                    "Yes, Cancel It",
+                    "No, Keep Request"
                 ):
                     # Show loading dialog while cancelling
                     LoadingDialog.show_loading(
@@ -1703,21 +1679,22 @@ class ConsultationPanel(QTabWidget):
                 reply = QMessageBox.question(
                     self,
                     "Cancel Consultation",
-                    "Are you sure you want to cancel this consultation request?",
+                    "Are you sure you want to cancel this consultation request? This action cannot be undone.", # Made message more specific
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )
 
                 if reply == QMessageBox.Yes:
-                    # Cancel the consultation
+                    # Cancel the consultation (this emits the signal to the controller)
                     cancel_consultation()
 
-                    # Show success message
-                    QMessageBox.information(
-                        self,
-                        "Consultation Cancelled",
-                        "Your consultation request has been cancelled successfully."
-                    )
+                    # Show success message (moved after operation)
+                    # QMessageBox.information(
+                    # self,
+                    # "Consultation Cancelled",
+                    # "Your consultation request has been cancelled successfully."
+                    # )
+            # If loading dialog was used, success is shown within it or after.
 
         except Exception as e:
             logger.error(f"Error cancelling consultation: {str(e)}")

@@ -1,11 +1,12 @@
 import logging
 import datetime
-from ..models import Consultation, ConsultationStatus, get_db
+from ..models import Consultation, ConsultationStatus, get_db, Faculty
 from ..utils.mqtt_utils import publish_consultation_request, publish_mqtt_message
 from ..utils.mqtt_topics import MQTTTopics
-from ..utils.cache_manager import invalidate_consultation_cache
+from ..utils.cache_manager import invalidate_consultation_cache, invalidate_faculty_cache
 from ..services.consultation_queue_service import get_consultation_queue_service, MessagePriority
 from sqlalchemy.orm import joinedload
+from ..services.async_mqtt_service import get_async_mqtt_service
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -198,6 +199,37 @@ class ConsultationController:
             logger.error(f"Error publishing consultation: {str(e)}")
             return False
 
+    def _publish_consultation_update(self, faculty_id, consultation_id, action, student_name=None, message_details=None):
+        """
+        Publish a consultation update (e.g., cancellation) to the faculty desk unit.
+        """
+        try:
+            topic = MQTTTopics.FACULTY_REQUESTS_TOPIC_TEMPLATE.format(faculty_id=faculty_id)
+            payload = {
+                "action": action,
+                "consultation_id": str(consultation_id) # Ensure ID is string for ESP32 JSON parsing
+            }
+            # For potential future use, if more details are needed for other actions
+            if student_name:
+                payload["student_name"] = student_name
+            if message_details:
+                payload["message"] = message_details
+
+            logger.info(f"Publishing consultation update to {topic}: {payload}")
+            
+            # Directly use the utility that handles async publishing and potential queuing
+            # publish_mqtt_message is more generic, let's use a more specific one if available
+            # or ensure publish_mqtt_message can handle a dict payload correctly (it should json.dumps it)
+            mqtt_service = get_async_mqtt_service()
+            
+            import json
+            mqtt_service.publish(topic, json.dumps(payload), qos=1) # Use QoS 1 for cancellations
+            logger.info(f"Successfully published {action} for consultation {consultation_id} to faculty {faculty_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error publishing consultation update for {consultation_id}: {e}")
+            return False
+
     def update_consultation_status(self, consultation_id, status):
         """
         Update consultation status.
@@ -231,7 +263,7 @@ class ConsultationController:
                 consultation.completed_at = datetime.datetime.now()
             elif status == ConsultationStatus.CANCELLED:
                 # No specific timestamp for cancellation, but we could add one if needed
-                pass
+                pass # Timestamping will be handled in cancel_consultation
 
             db.commit()
 
@@ -261,84 +293,134 @@ class ConsultationController:
             # ✅ CRITICAL FIX: Always close the database session
             db.close()
 
-    def cancel_consultation(self, consultation_id):
+    def cancel_consultation(self, consultation_id: int):
         """
         Cancel a consultation request.
-
-        Args:
-            consultation_id (int): Consultation ID
-
-        Returns:
-            Consultation: Updated consultation object or None if error
+        Updates status to CANCELLED, sets timestamp, and notifies faculty unit via MQTT.
         """
-        return self.update_consultation_status(consultation_id, ConsultationStatus.CANCELLED)
+        db = get_db()
+        try:
+            logger.info(f"Attempting to cancel consultation ID: {consultation_id}")
+            consultation = db.query(Consultation).options(joinedload(Consultation.faculty)).filter(Consultation.id == consultation_id).first()
+
+            if not consultation:
+                logger.error(f"Consultation not found for cancellation: {consultation_id}")
+                return None
+
+            if consultation.status == ConsultationStatus.CANCELLED:
+                logger.warning(f"Consultation {consultation_id} is already cancelled.")
+                # Optionally return the consultation object if needed by caller
+                return consultation
+            
+            if consultation.status not in [ConsultationStatus.PENDING, ConsultationStatus.ACCEPTED]:
+                logger.warning(f"Consultation {consultation_id} cannot be cancelled. Status: {consultation.status.value}")
+                # Depending on requirements, this might raise an error or return a specific status
+                return None # Or raise an exception like ValueError("Consultation cannot be cancelled")
+
+            consultation.status = ConsultationStatus.CANCELLED
+            consultation.cancelled_at = datetime.datetime.now() # Add a timestamp for cancellation
+            consultation.updated_at = datetime.datetime.now()
+
+            db.commit()
+            logger.info(f"Consultation {consultation_id} status updated to CANCELLED in DB.")
+
+            # Publish cancellation to faculty desk unit
+            if consultation.faculty:
+                self._publish_consultation_update(
+                    faculty_id=consultation.faculty.id,
+                    consultation_id=consultation.id,
+                    action="CANCEL_CONSULTATION"
+                )
+            else:
+                logger.warning(f"Faculty information not available for consultation {consultation_id}. Cannot send MQTT cancellation.")
+
+
+            # Invalidate caches
+            try:
+                invalidate_consultation_cache(consultation.student_id)
+                if consultation.faculty_id:
+                    invalidate_consultation_cache(consultation.faculty_id) # Faculty might also have a cache view
+                    invalidate_faculty_cache(consultation.faculty_id)
+                logger.debug(f"Invalidated caches for consultation {consultation_id}")
+            except Exception as e:
+                logger.warning(f"Failed to invalidate cache during cancellation: {str(e)}")
+
+            # Notify callbacks (e.g., UI refresh)
+            self._notify_callbacks(consultation)
+            logger.info(f"Successfully cancelled consultation {consultation_id}")
+            return consultation
+
+        except Exception as e:
+            logger.error(f"Error cancelling consultation {consultation_id}: {str(e)}")
+            db.rollback()
+            return None
+        finally:
+            db.close()
 
     def get_consultations(self, student_id=None, faculty_id=None, status=None):
         """
-        Get consultations, optionally filtered by student, faculty, or status.
-
-        Args:
-            student_id (int, optional): Filter by student ID
-            faculty_id (int, optional): Filter by faculty ID
-            status (ConsultationStatus, optional): Filter by status
-
-        Returns:
-            list: List of Consultation objects
+        Get consultations from the database with various filters.
+        Enhanced to load related faculty and student data to prevent lazy loading issues.
         """
         db = get_db()
         try:
             query = db.query(Consultation).options(
-                joinedload(Consultation.faculty),
-                joinedload(Consultation.student)
+                joinedload(Consultation.student),
+                joinedload(Consultation.faculty)
             )
 
-            # Apply filters
-            if student_id is not None:
+            if student_id:
                 query = query.filter(Consultation.student_id == student_id)
-
-            if faculty_id is not None:
+            if faculty_id:
                 query = query.filter(Consultation.faculty_id == faculty_id)
-
-            if status is not None:
-                query = query.filter(Consultation.status == status)
-
-            # Order by requested_at (newest first)
-            query = query.order_by(Consultation.requested_at.desc())
-
-            # Execute query
-            consultations = query.all()
-
+            if status:
+                if isinstance(status, list):
+                    query = query.filter(Consultation.status.in_(status))
+                else:
+                    query = query.filter(Consultation.status == status)
+            
+            # Order by most recent first
+            consultations = query.order_by(Consultation.requested_at.desc()).all()
+            
+            # Log consultation details if any found
+            if consultations:
+                logger.debug(f"Retrieved {len(consultations)} consultations with filters (student: {student_id}, faculty: {faculty_id}, status: {status})")
+                # for c in consultations:
+                #     logger.debug(f"  - ID: {c.id}, Status: {c.status.value}, Student: {c.student.name if c.student else 'N/A'}, Faculty: {c.faculty.name if c.faculty else 'N/A'}")
+            else:
+                logger.debug(f"No consultations found with filters (student: {student_id}, faculty: {faculty_id}, status: {status})")
+                
             return consultations
-
         except Exception as e:
             logger.error(f"Error getting consultations: {str(e)}")
             return []
         finally:
-            # ✅ FIXED: Ensure database session is always closed
             db.close()
 
-    def get_consultation_by_id(self, consultation_id):
+    def get_consultation_by_id(self, consultation_id: int):
         """
-        Get a consultation by ID.
-
-        Args:
-            consultation_id (int): Consultation ID
-
-        Returns:
-            Consultation: Consultation object or None if not found
+        Get a single consultation by ID with related student and faculty data.
         """
         db = get_db()
         try:
-            consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+            consultation = db.query(Consultation).options(
+                joinedload(Consultation.student),
+                joinedload(Consultation.faculty)
+            ).filter(Consultation.id == consultation_id).first()
+            
+            if consultation:
+                logger.debug(f"Retrieved consultation ID {consultation_id}: Status {consultation.status.value}")
+            else:
+                logger.warning(f"Consultation ID {consultation_id} not found.")
+                
             return consultation
         except Exception as e:
-            logger.error(f"Error getting consultation by ID: {str(e)}")
+            logger.error(f"Error getting consultation by ID {consultation_id}: {str(e)}")
             return None
         finally:
-            # ✅ FIXED: Ensure database session is always closed
             db.close()
 
-    def test_faculty_desk_connection(self, faculty_id):
+    def test_faculty_desk_connection(self, faculty_id: int):
         """
         Test the connection to a faculty desk unit by sending a test message.
 
@@ -351,7 +433,6 @@ class ConsultationController:
         try:
             # Get faculty information
             db = get_db()
-            from ..models import Faculty
             faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
 
             if not faculty:

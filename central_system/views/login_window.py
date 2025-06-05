@@ -216,7 +216,7 @@ class LoginWindow(BaseWindow):
         Start the RFID scanning animation and process.
         """
         self.rfid_reading = True
-        self.scanning_status_label.setText("Scanning...")
+        self.scanning_status_label.setText("Scan your ID to Consult")
         self.scanning_status_label.setStyleSheet(f"font-size: {ConsultEaseTheme.FONT_SIZE_XLARGE}pt; color: {ConsultEaseTheme.SECONDARY_COLOR};")
         self.scanning_frame.setStyleSheet(f'''
             QFrame {{
