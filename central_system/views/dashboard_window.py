@@ -771,33 +771,35 @@ class DashboardWindow(BaseWindow):
         """
         Show a message when no faculty members are available.
         """
-        if not hasattr(self, 'empty_message_label') or not self.empty_message_label:
-            self.empty_message_label = QLabel("No faculty members available. Please try again later.")
-            self.empty_message_label.setAlignment(Qt.AlignCenter)
-            self.empty_message_label.setStyleSheet("""
-                font-size: 16pt; 
-                color: #555; 
-                background-color: #f9f9f9;
-                padding: 20px;
-                border-radius: 10px;
-                border: 1px solid #ddd;
-            """)
-            self.faculty_grid.addWidget(self.empty_message_label, 0, 0, 1, 3)
-            self.empty_message_label.setVisible(True)
-            logger.info("Showing empty faculty message")
-        else:
-            self.empty_message_label.setVisible(True)
+        # Clear the grid first
+        self._clear_faculty_grid_pooled()
+        
+        # Ensure any previous content is cleared if faculty_grid is used directly
+        while self.faculty_grid.count():
+            item = self.faculty_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Always create a fresh empty message label to avoid "wrapped C/C++ object deleted" errors
+        self.empty_message_label = QLabel("No faculty members available. Please try again later.")
+        self.empty_message_label.setAlignment(Qt.AlignCenter)
+        self.empty_message_label.setStyleSheet("""
+            font-size: 16pt; 
+            color: #555; 
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+        """)
+        self.faculty_grid.addWidget(self.empty_message_label, 0, 0, 1, 3)
+        self.empty_message_label.setVisible(True)
+        logger.info("Showing empty faculty message")
 
     def _show_loading_indicator(self):
         """
         Show a non-modal loading message in the faculty grid area.
         """
         self._clear_faculty_grid_pooled()
-        # Add a QLabel to the grid
-        if not hasattr(self, '_loading_label') or self._loading_label is None:
-            self._loading_label = QLabel("🔄 Loading faculty data, please wait...")
-            self._loading_label.setAlignment(Qt.AlignCenter)
-            self._loading_label.setStyleSheet("font-size: 16pt; color: #888888; padding: 50px;")
         
         # Ensure any previous content is cleared if faculty_grid is used directly
         while self.faculty_grid.count():
@@ -805,7 +807,12 @@ class DashboardWindow(BaseWindow):
             if item.widget():
                 item.widget().deleteLater() # Or hide() if pooled/managed elsewhere
 
-        self.faculty_grid.addWidget(self.faculty_label_placeholder if hasattr(self, 'faculty_label_placeholder') else self._loading_label, 0, 0, 1, 3) # Span across columns
+        # Always create a fresh loading label to avoid "wrapped C/C++ object deleted" errors
+        self._loading_label = QLabel("🔄 Loading faculty data, please wait...")
+        self._loading_label.setAlignment(Qt.AlignCenter)
+        self._loading_label.setStyleSheet("font-size: 16pt; color: #888888; padding: 50px;")
+        
+        self.faculty_grid.addWidget(self._loading_label, 0, 0, 1, 3) # Span across columns
         self._loading_label.show()
         self.status_bar_label.setText("🔄 Loading faculty data...")
         logger.debug("Loading indicator shown.")
@@ -827,27 +834,31 @@ class DashboardWindow(BaseWindow):
         """
         logger.error(f"Showing error message: {error_text}")
         
-        # Create an error message widget if it doesn't exist
-        if not hasattr(self, 'error_message_widget') or not self.error_message_widget:
-            self.error_message_widget = QLabel(error_text)
-            self.error_message_widget.setAlignment(Qt.AlignCenter)
-            self.error_message_widget.setWordWrap(True)
-            self.error_message_widget.setStyleSheet("""
-                padding: 20px; 
-                background-color: #ffdddd; 
-                color: #990000; 
-                border: 1px solid #990000; 
-                border-radius: 5px; 
-                font-size: 14pt;
-                margin: 20px;
-            """)
-            # Add it to the faculty grid, spanning multiple columns if needed
-            self.faculty_grid.addWidget(self.error_message_widget, 0, 0, 1, 3)
-            self.error_message_widget.show()
-        else:
-            # Update the text and make sure it's visible
-            self.error_message_widget.setText(error_text)
-            self.error_message_widget.setVisible(True)
+        # Clear the grid first
+        self._clear_faculty_grid_pooled()
+        
+        # Ensure any previous content is cleared if faculty_grid is used directly
+        while self.faculty_grid.count():
+            item = self.faculty_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Always create a fresh error message widget to avoid "wrapped C/C++ object deleted" errors
+        self.error_message_widget = QLabel(error_text)
+        self.error_message_widget.setAlignment(Qt.AlignCenter)
+        self.error_message_widget.setWordWrap(True)
+        self.error_message_widget.setStyleSheet("""
+            padding: 20px; 
+            background-color: #ffdddd; 
+            color: #990000; 
+            border: 1px solid #990000; 
+            border-radius: 5px; 
+            font-size: 14pt;
+            margin: 20px;
+        """)
+        # Add it to the faculty grid, spanning multiple columns if needed
+        self.faculty_grid.addWidget(self.error_message_widget, 0, 0, 1, 3)
+        self.error_message_widget.show()
         
         # Update status label too
         self.status_bar_label.setText(f"Error: {error_text}")
@@ -1049,22 +1060,29 @@ class DashboardWindow(BaseWindow):
         
         # Show a default message in the faculty grid area
         try:
-            if not hasattr(self, 'offline_message_label') or not self.offline_message_label:
-                self.offline_message_label = QLabel("Unable to load faculty data. System may be offline.")
-                self.offline_message_label.setAlignment(Qt.AlignCenter)
-                self.offline_message_label.setStyleSheet("""
-                    font-size: 16pt;
-                    padding: 20px;
-                    background-color: #f8f9fa; 
-                    color: #495057; 
-                    border: 1px solid #ced4da; 
-                    border-radius: 5px;
-                    margin: 20px;
-                """)
-                # Clear any existing widgets before adding this
-                self._clear_faculty_grid_pooled()
-                self.faculty_grid.addWidget(self.offline_message_label, 0, 0, 1, 3)
-                self.offline_message_label.show()
+            # Clear any existing widgets before adding this
+            self._clear_faculty_grid_pooled()
+            
+            # Ensure any previous content is cleared if faculty_grid is used directly
+            while self.faculty_grid.count():
+                item = self.faculty_grid.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            
+            # Always create a fresh offline message label to avoid "wrapped C/C++ object deleted" errors
+            self.offline_message_label = QLabel("Unable to load faculty data. System may be offline.")
+            self.offline_message_label.setAlignment(Qt.AlignCenter)
+            self.offline_message_label.setStyleSheet("""
+                font-size: 16pt;
+                padding: 20px;
+                background-color: #f8f9fa; 
+                color: #495057; 
+                border: 1px solid #ced4da; 
+                border-radius: 5px;
+                margin: 20px;
+            """)
+            self.faculty_grid.addWidget(self.offline_message_label, 0, 0, 1, 3)
+            self.offline_message_label.show()
         except Exception as e:
             logger.error(f"Error showing offline message: {e}")
         
