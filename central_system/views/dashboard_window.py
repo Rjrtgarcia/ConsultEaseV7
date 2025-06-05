@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QGridLayout, QScrollArea, QFrame,
                                QLineEdit, QComboBox, QMessageBox, QTextEdit,
                                QSplitter, QApplication, QSizePolicy)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread, QObject, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread, QObject, pyqtSlot, QSettings
 from PyQt5.QtGui import QPixmap, QIcon
 
 import os
@@ -419,11 +419,10 @@ class DashboardWindow(BaseWindow):
         self.main_splitter.setCollapsible(0, False) # Prevent faculty grid from collapsing
         self.main_splitter.setCollapsible(1, True)  # Allow consultation panel to be collapsed
 
+        # Restore previous splitter state if available
+        self.restore_splitter_state()
 
         main_layout.addWidget(self.main_splitter)
-
-        # Restore splitter state after UI is built
-        self.restore_splitter_state()
 
         # Status bar (optional, for non-modal messages)
         self.status_bar_label = QLabel("Ready.")
@@ -1448,4 +1447,37 @@ class DashboardWindow(BaseWindow):
         """
         logger.info(f"Consultation cancellation requested for ID: {consultation_id}")
         # Implementation needed - for example, calling a controller method
+        
+    def save_splitter_state(self):
+        """
+        Save the current splitter state to application settings.
+        """
+        try:
+            settings = QSettings("ConsultEase", "ConsultEaseSystem")
+            settings.setValue("dashboard/splitter_state", self.main_splitter.saveState())
+            logger.debug("Saved splitter state")
+        except Exception as e:
+            logger.error(f"Error saving splitter state: {e}")
+            
+    def restore_splitter_state(self):
+        """
+        Restore the splitter state from application settings.
+        If no saved state exists, the current state is maintained.
+        """
+        try:
+            settings = QSettings("ConsultEase", "ConsultEaseSystem")
+            splitter_state = settings.value("dashboard/splitter_state")
+            
+            if splitter_state:
+                success = self.main_splitter.restoreState(splitter_state)
+                if success:
+                    logger.debug("Restored splitter state from settings")
+                else:
+                    logger.warning("Failed to restore splitter state (invalid data), using defaults")
+            else:
+                logger.debug("No saved splitter state found, using defaults")
+                
+        except Exception as e:
+            logger.error(f"Error restoring splitter state: {e}")
+            # The default state set earlier will remain
         
