@@ -316,14 +316,19 @@ class DashboardWindow(BaseWindow):
         """
         Initialize the main UI components of the dashboard.
         """
-        # Get theme settings (if any)
+        # Get the specific stylesheet for the dashboard
+        # ✅ FIX: Changed from get_current_theme() to get_dashboard_stylesheet()
         try:
-            from ..utils.theme import ConsultEaseTheme
-            theme = ConsultEaseTheme.get_current_theme()
-        except ImportError:
-            theme = None # Fallback if theme system is not available
+            dashboard_stylesheet = ConsultEaseTheme.get_dashboard_stylesheet()
+            self.setStyleSheet(dashboard_stylesheet) # Apply the stylesheet
+            logger.debug("Dashboard stylesheet applied.")
+        except AttributeError as e:
+            logger.error(f"Failed to get or apply dashboard stylesheet: {e}")
+            # Fallback or default styling if theme fails, or re-raise
+            # For now, just logging, but consider a minimal default stylesheet.
+        except Exception as e:
+            logger.error(f"An unexpected error occurred while applying dashboard stylesheet: {e}")
 
-        # Main layout
         main_layout = QVBoxLayout(self)
         self.setLayout(main_layout)
 
