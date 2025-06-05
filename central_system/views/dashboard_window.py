@@ -403,10 +403,13 @@ class DashboardWindow(BaseWindow):
         self.main_splitter.addWidget(faculty_grid_container)
 
         # Right side: Consultation Panel
-        self.consultation_panel = ConsultationPanel(student=self.student)
-        self.consultation_panel.consultation_requested.connect(self.handle_consultation_request) # Connect its signal
+        self.consultation_panel = ConsultationPanel(self.student)
         self.consultation_panel.setMinimumWidth(450) # Ensure it has a reasonable minimum width
         self.consultation_panel.setMaximumWidth(600) # And a maximum
+        
+        # Connect consultation panel signals
+        self.consultation_panel.consultation_requested.connect(self._handle_consultation_request) # ✅ CHANGED: Connect to new method
+        self.consultation_panel.consultation_cancelled.connect(self._handle_consultation_cancel) # ✅ FIXED: Connected to the correct method name with underscore
         
         self.main_splitter.addWidget(self.consultation_panel)
         
@@ -1413,3 +1416,48 @@ class DashboardWindow(BaseWindow):
         """Emits the logout_requested signal."""
         logger.info("Logout requested by user.")
         self.logout_requested.emit()
+
+    def _handle_consultation_request(self, faculty, message, course_code): # ✅ ADDED: New method to handle consultation requests
+        """
+        Handles consultation requests from the consultation panel.
+        Re-emits the request via the dashboard's signal.
+        
+        Args:
+            faculty: The faculty object or data
+            message: The consultation message/details
+            course_code: The course code (optional)
+        """
+        try:
+            # Extract the faculty_id from the faculty object/data
+            faculty_id = None
+            if hasattr(faculty, 'id'):
+                faculty_id = faculty.id
+            elif isinstance(faculty, dict) and 'id' in faculty:
+                faculty_id = faculty['id']
+            
+            if not faculty_id:
+                logger.error("No faculty ID found in consultation request")
+                return
+                
+            logger.info(f"Handling consultation request for faculty ID: {faculty_id}")
+            
+            # Emit the consultation request signal with the extracted faculty_id and course_code
+            self.consultation_requested.emit(faculty_id, course_code)
+            
+            # Note: The "message" parameter is not forwarded because the dashboard's
+            # consultation_requested signal only accepts faculty_id and course_code
+            
+        except Exception as e:
+            logger.error(f"Error handling consultation request: {str(e)}")
+            
+    def _handle_consultation_cancel(self, consultation_id): # ✅ ADDED: Placeholder for the handle_consultation_cancel method
+        """
+        Handles consultation cancellation requests from the consultation panel.
+        This is a placeholder - implement actual functionality as needed.
+        
+        Args:
+            consultation_id: The ID of the consultation to cancel
+        """
+        logger.info(f"Consultation cancellation requested for ID: {consultation_id}")
+        # Implementation needed - for example, calling a controller method
+        
