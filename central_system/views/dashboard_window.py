@@ -248,7 +248,7 @@ class DashboardWindow(BaseWindow):
     Main dashboard window with faculty availability display and consultation request functionality.
     """
     faculty_selected = pyqtSignal(object)  # Emits faculty data when selected
-    consultation_requested = pyqtSignal(str, str)  # Emits faculty_id, course_code
+    consultation_requested = pyqtSignal(object, str, str)  # ✅ FIXED: Changed to emit (faculty, message, course_code)
     request_ui_refresh = pyqtSignal()
     logout_requested = pyqtSignal() # ✅ ADDED: Signal for logout request
 
@@ -413,8 +413,9 @@ class DashboardWindow(BaseWindow):
         
         self.main_splitter.addWidget(self.consultation_panel)
         
-        # Set initial splitter sizes (e.g., 60% for faculty grid, 40% for consultation panel)
-        self.main_splitter.setSizes([self.width() * 0.6, self.width() * 0.4] if self.width() > 0 else [600, 400])
+        # Set initial sizes for splitter
+        # ✅ FIXED: Convert float values to integers with int()
+        self.main_splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)] if self.width() > 0 else [600, 400])
         self.main_splitter.setCollapsible(0, False) # Prevent faculty grid from collapsing
         self.main_splitter.setCollapsible(1, True)  # Allow consultation panel to be collapsed
 
@@ -1428,24 +1429,11 @@ class DashboardWindow(BaseWindow):
             course_code: The course code (optional)
         """
         try:
-            # Extract the faculty_id from the faculty object/data
-            faculty_id = None
-            if hasattr(faculty, 'id'):
-                faculty_id = faculty.id
-            elif isinstance(faculty, dict) and 'id' in faculty:
-                faculty_id = faculty['id']
+            # We no longer need to extract faculty_id since we're forwarding the entire faculty object
+            logger.info(f"Handling consultation request for faculty: {getattr(faculty, 'name', None) or faculty.get('name', 'Unknown')}")
             
-            if not faculty_id:
-                logger.error("No faculty ID found in consultation request")
-                return
-                
-            logger.info(f"Handling consultation request for faculty ID: {faculty_id}")
-            
-            # Emit the consultation request signal with the extracted faculty_id and course_code
-            self.consultation_requested.emit(faculty_id, course_code)
-            
-            # Note: The "message" parameter is not forwarded because the dashboard's
-            # consultation_requested signal only accepts faculty_id and course_code
+            # Forward all parameters to the main application handler
+            self.consultation_requested.emit(faculty, message, course_code)
             
         except Exception as e:
             logger.error(f"Error handling consultation request: {str(e)}")
