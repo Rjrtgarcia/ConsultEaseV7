@@ -595,8 +595,16 @@ class ConsultEaseApp:
         self.current_student = student_data
 
         if self.dashboard_window is None:
-            # Create a new dashboard window
-            self.dashboard_window = DashboardWindow(student_data)
+            # Create a new dashboard window with faculty_controller and consultation_controller
+            logger.info("Creating new DashboardWindow instance with controllers")
+            self.dashboard_window = DashboardWindow(
+                student_data, 
+                consultation_controller=self.consultation_controller,
+                faculty_controller=self.faculty_controller
+            )
+            logger.info("DashboardWindow instance created successfully")
+            
+            # Connect signals
             self.dashboard_window.change_window.connect(self.handle_window_change)
             self.dashboard_window.consultation_requested.connect(self.handle_consultation_request)
             self.dashboard_window.logout_requested.connect(self._handle_user_logout)

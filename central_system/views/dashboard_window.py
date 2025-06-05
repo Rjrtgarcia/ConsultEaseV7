@@ -8,10 +8,12 @@ from PyQt5.QtGui import QPixmap, QIcon
 import os
 import logging
 import time
+import hashlib  # Added for hash calculation
 from .base_window import BaseWindow
 from .consultation_panel import ConsultationPanel
 from ..utils.ui_components import FacultyCard
-from ..ui.pooled_faculty_card import get_faculty_card_manager
+from ..ui.pooled_faculty_card import get_faculty_card_manager, PooledFacultyCard  # Added missing import
+from ..utils.theme import ConsultEaseTheme  # Added import for theme
 from ..utils.ui_performance import (
     get_ui_batcher, get_widget_state_manager, SmartRefreshManager,
     batch_ui_update, timed_ui_update
@@ -325,13 +327,19 @@ class DashboardWindow(BaseWindow):
             logger.debug("Dashboard stylesheet applied.")
         except AttributeError as e:
             logger.error(f"Failed to get or apply dashboard stylesheet: {e}")
-            # Fallback or default styling if theme fails, or re-raise
-            # For now, just logging, but consider a minimal default stylesheet.
+            # Fallback or default styling if theme fails
+            self.apply_touch_friendly_style()  # Use BaseWindow's style as fallback
         except Exception as e:
             logger.error(f"An unexpected error occurred while applying dashboard stylesheet: {e}")
+            self.apply_touch_friendly_style()  # Use BaseWindow's style as fallback
 
-        main_layout = QVBoxLayout(self)
-        self.setLayout(main_layout)
+        # Create a central widget to contain the layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)  # Set as central widget for QMainWindow
+        
+        # Create the main layout for the central widget
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)  # Add margins for better visual appearance
 
         # Header
         header_widget = QWidget()
@@ -763,54 +771,22 @@ class DashboardWindow(BaseWindow):
         """
         Show a message when no faculty members are available.
         """
-        logger.info("Showing empty faculty message")
-
-        # Create a message widget
-        message_widget = QWidget()
-        message_widget.setMinimumHeight(300)  # Ensure it's visible
-        message_layout = QVBoxLayout(message_widget)
-        message_layout.setAlignment(Qt.AlignCenter)
-        message_layout.setSpacing(20)
-
-        # Title
-        title_label = QLabel("No Faculty Members Available")
-        title_label.setObjectName("empty_state_title")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("""
-            QLabel#empty_state_title {
-                font-size: 28px;
-                font-weight: bold;
-                color: #2c3e50;
-                margin: 20px;
+        if not hasattr(self, 'empty_message_label') or not self.empty_message_label:
+            self.empty_message_label = QLabel("No faculty members available. Please try again later.")
+            self.empty_message_label.setAlignment(Qt.AlignCenter)
+            self.empty_message_label.setStyleSheet("""
+                font-size: 16pt; 
+                color: #555; 
+                background-color: #f9f9f9;
                 padding: 20px;
-            }
-        """)
-        message_layout.addWidget(title_label)
-
-        # Description
-        desc_label = QLabel("Faculty members need to be added through the admin dashboard.\nOnce added, they will appear here when available for consultation.\n\nPlease contact your administrator to add faculty members.")
-        desc_label.setObjectName("empty_state_desc")
-        desc_label.setAlignment(Qt.AlignCenter)
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("""
-            QLabel#empty_state_desc {
-                font-size: 18px;
-                color: #7f8c8d;
-                margin: 10px 20px;
-                padding: 20px;
-                line-height: 1.6;
-                background-color: #f8f9fa;
                 border-radius: 10px;
-                border: 2px solid #e9ecef;
-            }
-        """)
-        message_layout.addWidget(desc_label)
-
-        # Add some spacing
-        message_layout.addStretch()
-
-        # Add the message widget to the grid - span all columns
-        self.faculty_grid.addWidget(message_widget, 0, 0, 1, self.faculty_grid.columnCount() if self.faculty_grid.columnCount() > 0 else 1)
+                border: 1px solid #ddd;
+            """)
+            self.faculty_grid.addWidget(self.empty_message_label, 0, 0, 1, 3)
+            self.empty_message_label.setVisible(True)
+            logger.info("Showing empty faculty message")
+        else:
+            self.empty_message_label.setVisible(True)
 
     def _show_loading_indicator(self):
         """
@@ -847,69 +823,37 @@ class DashboardWindow(BaseWindow):
 
     def _show_error_message(self, error_text):
         """
-        Show an error message in the faculty grid.
-
-        Args:
-            error_text (str): Error message to display
+        Show an error message on the faculty grid.
         """
-        logger.info(f"Showing error message: {error_text}")
-
-        # Clear existing grid first
-        self._clear_faculty_grid_pooled()
-
-        # Create error widget
-        error_widget = QWidget()
-        error_widget.setMinimumHeight(250)
-        error_layout = QVBoxLayout(error_widget)
-        error_layout.setAlignment(Qt.AlignCenter)
-        error_layout.setSpacing(15)
-
-        # Error title
-        error_title = QLabel("⚠️ Error Loading Faculty Data")
-        error_title.setAlignment(Qt.AlignCenter)
-        error_title.setStyleSheet("""
-            QLabel {
-                font-size: 24px;
-                font-weight: bold;
-                color: #e74c3c;
-                padding: 15px;
-            }
-        """)
-        error_layout.addWidget(error_title)
-
-        # Error message
-        error_message = QLabel(error_text)
-        error_message.setAlignment(Qt.AlignCenter)
-        error_message.setWordWrap(True)
-        error_message.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                color: #7f8c8d;
-                padding: 10px 20px;
-                background-color: #fdf2f2;
-                border: 2px solid #f5c6cb;
-                border-radius: 8px;
-                margin: 10px;
-            }
-        """)
-        error_layout.addWidget(error_message)
-
-        # Retry instruction
-        retry_label = QLabel("The system will automatically retry in a few moments.\nIf the problem persists, please contact your administrator.")
-        retry_label.setAlignment(Qt.AlignCenter)
-        retry_label.setWordWrap(True)
-        retry_label.setStyleSheet("""
-            QLabel {
-                font-size: 12px;
-                color: #95a5a6;
-                padding: 10px;
-                font-style: italic;
-            }
-        """)
-        error_layout.addWidget(retry_label)
-
-        # Add to grid
-        self.faculty_grid.addWidget(error_widget, 0, 0, 1, 1)
+        logger.error(f"Showing error message: {error_text}")
+        
+        # Create an error message widget if it doesn't exist
+        if not hasattr(self, 'error_message_widget') or not self.error_message_widget:
+            self.error_message_widget = QLabel(error_text)
+            self.error_message_widget.setAlignment(Qt.AlignCenter)
+            self.error_message_widget.setWordWrap(True)
+            self.error_message_widget.setStyleSheet("""
+                padding: 20px; 
+                background-color: #ffdddd; 
+                color: #990000; 
+                border: 1px solid #990000; 
+                border-radius: 5px; 
+                font-size: 14pt;
+                margin: 20px;
+            """)
+            # Add it to the faculty grid, spanning multiple columns if needed
+            self.faculty_grid.addWidget(self.error_message_widget, 0, 0, 1, 3)
+            self.error_message_widget.show()
+        else:
+            # Update the text and make sure it's visible
+            self.error_message_widget.setText(error_text)
+            self.error_message_widget.setVisible(True)
+        
+        # Update status label too
+        self.status_bar_label.setText(f"Error: {error_text}")
+        
+        # Show popup for critical errors
+        QMessageBox.critical(self, "Error", error_text)
 
     def filter_faculty(self):
         """
@@ -1005,6 +949,8 @@ class DashboardWindow(BaseWindow):
         if not self.faculty_controller:
             logger.error("Cannot refresh faculty: FacultyController not set.")
             self.status_bar_label.setText("❌ Error: System not ready for refresh.")
+            # Show an error message in the UI as well
+            self._show_error_message("Faculty controller not set. Please restart the application.")
             return
 
         if self._faculty_fetch_thread and self._faculty_fetch_thread.isRunning():
@@ -1014,26 +960,33 @@ class DashboardWindow(BaseWindow):
 
         self._show_loading_indicator() # Show non-modal loading message
 
-        # Recreate thread and worker for cleanliness if needed, or manage single instance
+        # Clean up any existing thread
         if self._faculty_fetch_thread and self._faculty_fetch_thread.isRunning():
              self._faculty_fetcher.stop() # Request previous to stop
              self._faculty_fetch_thread.quit()
              self._faculty_fetch_thread.wait(1000) # Wait a bit
 
-        self._faculty_fetch_thread = QThread(self)
-        self._faculty_fetcher = FacultyFetcher(self.faculty_controller)
-        self._faculty_fetcher.moveToThread(self._faculty_fetch_thread)
-
-        self._faculty_fetcher.finished.connect(self._handle_faculty_loaded)
-        self._faculty_fetcher.error.connect(self._handle_faculty_load_error)
-        self._faculty_fetch_thread.started.connect(self._faculty_fetcher.run)
-        # Clean up thread when it finishes
-        self._faculty_fetch_thread.finished.connect(self._faculty_fetch_thread.deleteLater)
-        self._faculty_fetcher.finished.connect(self._faculty_fetch_thread.quit) # Ensure thread quits
-        self._faculty_fetcher.error.connect(self._faculty_fetch_thread.quit)
-
-        logger.info("Starting faculty fetch thread.")
-        self._faculty_fetch_thread.start()
+        try:
+            self._faculty_fetch_thread = QThread(self)
+            self._faculty_fetcher = FacultyFetcher(self.faculty_controller)
+            self._faculty_fetcher.moveToThread(self._faculty_fetch_thread)
+            
+            self._faculty_fetcher.finished.connect(self._handle_faculty_loaded)
+            self._faculty_fetcher.error.connect(self._handle_faculty_load_error)
+            self._faculty_fetch_thread.started.connect(self._faculty_fetcher.run)
+            
+            # Clean up thread when it finishes
+            self._faculty_fetch_thread.finished.connect(self._faculty_fetch_thread.deleteLater)
+            self._faculty_fetcher.finished.connect(self._faculty_fetch_thread.quit) # Ensure thread quits
+            self._faculty_fetcher.error.connect(self._faculty_fetch_thread.quit)
+            
+            logger.info("Starting faculty fetch thread.")
+            self._faculty_fetch_thread.start()
+        except Exception as e:
+            logger.error(f"Error starting faculty fetch thread: {e}")
+            self._hide_loading_indicator()
+            self._show_error_message(f"Error starting faculty refresh: {e}")
+            self.status_bar_label.setText("❌ Faculty refresh error.")
 
     @pyqtSlot(list)
     def _handle_faculty_loaded(self, faculty_list_from_worker):
@@ -1090,15 +1043,34 @@ class DashboardWindow(BaseWindow):
         """Handles errors from the faculty fetcher."""
         logger.error(f"Error loading faculty data from worker: {error_message}")
         self._hide_loading_indicator()
-        self._show_error_message(f"Failed to load faculty: {error_message}")
+        self._show_error_message(f"Failed to load faculty data: {error_message}")
         self.status_bar_label.setText(f"❌ Error loading faculty: {error_message}")
         self._is_initial_load_pending = False # Allow next attempt
-         # Clean up worker and thread if they are one-shot per request
+        
+        # Show a default message in the faculty grid area
+        try:
+            if not hasattr(self, 'offline_message_label') or not self.offline_message_label:
+                self.offline_message_label = QLabel("Unable to load faculty data. System may be offline.")
+                self.offline_message_label.setAlignment(Qt.AlignCenter)
+                self.offline_message_label.setStyleSheet("""
+                    font-size: 16pt;
+                    padding: 20px;
+                    background-color: #f8f9fa; 
+                    color: #495057; 
+                    border: 1px solid #ced4da; 
+                    border-radius: 5px;
+                    margin: 20px;
+                """)
+                # Clear any existing widgets before adding this
+                self._clear_faculty_grid_pooled()
+                self.faculty_grid.addWidget(self.offline_message_label, 0, 0, 1, 3)
+                self.offline_message_label.show()
+        except Exception as e:
+            logger.error(f"Error showing offline message: {e}")
+        
+        # Clean up worker and thread if they are one-shot per request
         if self._faculty_fetcher:
             self._faculty_fetcher.stop()
-        # if self._faculty_fetch_thread:
-        #     self._faculty_fetch_thread.quit()
-        #     self._faculty_fetch_thread.wait(500)
 
     def show_consultation_form(self, faculty_or_id):
         """
