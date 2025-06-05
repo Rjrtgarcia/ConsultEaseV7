@@ -251,76 +251,66 @@ class DashboardWindow(BaseWindow):
     consultation_requested = pyqtSignal(object, str, str)
     request_ui_refresh = pyqtSignal()
 
-    def __init__(self, student=None, parent=None):
+    def __init__(self, student=None, parent=None, consultation_controller=None, faculty_controller=None):
         # Set all instance variables FIRST before calling super().__init__()
         # because BaseWindow.__init__() will call self.init_ui() which needs these variables
         self.student = student
         self.faculty_list = []
+        self._last_faculty_data_list = []
         self.consultation_panel = None
         self.faculty_card_manager = get_faculty_card_manager()
-        self.faculty_controller = None
+        self.consultation_controller = consultation_controller
+        self.faculty_controller = faculty_controller
 
         # For background faculty loading
         self._faculty_fetch_thread = None
         self._faculty_fetcher = None
         self._is_initial_load_pending = True
 
+        # Call parent __init__ which will automatically call self.init_ui()
+        # BaseWindow.__init__ will call self.init_ui(), so variables used by init_ui must be set before this.
+        super().__init__(parent)
+        
+        # Now that self is a fully initialized QWidget, we can create QTimers with self as parent.
         # Debounce timer for full refreshes (if any)
         self._refresh_debounce_timer = QTimer(self)
         self._refresh_debounce_timer.setSingleShot(True)
         self._refresh_debounce_timer.timeout.connect(self._trigger_background_faculty_refresh)
         
-        # Call parent __init__ which will automatically call self.init_ui()
-        super().__init__(parent)
+        # Set up additional initialization after UI is created by super().__init__()
         
-        # Set up additional initialization after UI is created
-        # This should be called after faculty_controller is available
-        # self.setup_realtime_updates() # Moved to after controller is set
-
         # Set up smart refresh manager for optimized faculty status updates (periodic full sync)
         self.refresh_timer = QTimer(self)
-        self.refresh_timer.setSingleShot(False)
-        self.refresh_timer.timeout.connect(self.request_background_faculty_refresh)
-        self.refresh_timer.start(300000)  # Default 5 minutes, will be adjusted
-
-        # Add adaptive refresh logic - reduce frequency when no changes detected
+        self.refresh_timer.setSingleShot(False) # Keep periodic
+        self.refresh_timer.timeout.connect(self.request_background_faculty_refresh) # Request a background refresh
+        
+        # Initialize adaptive refresh logic - these are fine here
         self._consecutive_no_changes = 0
         self._max_refresh_interval = 600000  # Maximum 10 minutes
         self._min_refresh_interval = 180000   # Minimum 3 minutes
-        
-        # Initialize last known state for change detection
         self._last_faculty_hash = None
         self._last_update_time = time.time()
-        
+
         # Connect signals with debouncing to prevent spam
         self.request_ui_refresh.connect(self._debounced_refresh)
 
         # UI performance utilities
         self.ui_batcher = get_ui_batcher()
         self.widget_state_manager = get_widget_state_manager()
-
-        # Track faculty data for efficient comparison
-        self._last_faculty_hash = None
-
-        # Loading state management
-        self._is_loading = False
-        self._loading_widget = None
-
-        # Log student info for debugging
-        if student:
-            # Handle both student object and student data dictionary
-            if isinstance(student, dict):
-                student_id = student.get('id', 'Unknown')
-                student_name = student.get('name', 'Unknown')
-                student_rfid = student.get('rfid_uid', 'Unknown')
-            else:
-                # Legacy support for student objects
-                student_id = getattr(student, 'id', 'Unknown')
-                student_name = getattr(student, 'name', 'Unknown')
-                student_rfid = getattr(student, 'rfid_uid', 'Unknown')
-            logger.info(f"Dashboard initialized with student: ID={student_id}, Name={student_name}, RFID={student_rfid}")
+        
+        # Set faculty controller if provided (this will trigger MQTT setup and initial load)
+        if self.faculty_controller:
+            self.set_faculty_controller(self.faculty_controller)
         else:
-            logger.warning("Dashboard initialized without student information")
+            logger.warning("DashboardWindow initialized without FacultyController. Faculty list will not load initially via set_faculty_controller.")
+            # Optionally, you could show an error or a placeholder if the controller is essential for basic operation
+            # For now, it will just mean no data is loaded until controller is set and set_faculty_controller is called.
+
+        # Start the periodic refresh timer only after the controller is potentially set and initial load might be triggered.
+        # If faculty_controller is not set at init, set_faculty_controller must be called later.
+        self.refresh_timer.start(self._min_refresh_interval) # Start with min interval
+
+        logger.info("DashboardWindow __init__ completed.")
 
     def init_ui(self):
         """
