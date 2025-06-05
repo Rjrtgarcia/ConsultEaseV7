@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QLineEdit, QComboBox, QMessageBox, QTextEdit,
                                QSplitter, QApplication, QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread, QObject, pyqtSlot
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QIcon
 
 import os
 import logging
@@ -247,9 +247,10 @@ class DashboardWindow(BaseWindow):
     """
     Main dashboard window with faculty availability display and consultation request functionality.
     """
-    # Signal to handle consultation request
-    consultation_requested = pyqtSignal(object, str, str)
+    faculty_selected = pyqtSignal(object)  # Emits faculty data when selected
+    consultation_requested = pyqtSignal(str, str)  # Emits faculty_id, course_code
     request_ui_refresh = pyqtSignal()
+    logout_requested = pyqtSignal() # ✅ ADDED: Signal for logout request
 
     def __init__(self, student=None, parent=None, consultation_controller=None, faculty_controller=None):
         # Set all instance variables FIRST before calling super().__init__()
@@ -348,7 +349,7 @@ class DashboardWindow(BaseWindow):
         # Logout button
         logout_button = QPushButton("Logout")
         logout_button.setStyleSheet("font-size: 12pt; padding: 8px 15px; background-color: #D32F2F; color: white; border-radius: 5px;")
-        logout_button.clicked.connect(self.logout)
+        logout_button.clicked.connect(self._request_logout) # ✅ CHANGED: Connect to the new method
         header_layout.addWidget(logout_button)
         
         main_layout.addWidget(header_widget)
@@ -1407,3 +1408,8 @@ class DashboardWindow(BaseWindow):
         # Schedule a new refresh after a short delay
         self._refresh_debounce_timer.start(500)  # 500ms debounce
         logger.info(f"🔥🔥🔥 _debounced_refresh scheduled refresh in 500ms")
+
+    def _request_logout(self): # ✅ ADDED: Method to emit logout signal
+        """Emits the logout_requested signal."""
+        logger.info("Logout requested by user.")
+        self.logout_requested.emit()

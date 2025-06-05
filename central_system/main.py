@@ -599,6 +599,7 @@ class ConsultEaseApp:
             self.dashboard_window = DashboardWindow(student_data)
             self.dashboard_window.change_window.connect(self.handle_window_change)
             self.dashboard_window.consultation_requested.connect(self.handle_consultation_request)
+            self.dashboard_window.logout_requested.connect(self._handle_user_logout)
         else:
             # Update student info and reinitialize the UI
             student_name = student_data.get('name', 'None') if student_data else 'None'
@@ -1112,6 +1113,21 @@ class ConsultEaseApp:
             self.show_admin_dashboard_window(data)
         else:
             logger.warning(f"Unknown window: {window_name}")
+
+    def _handle_user_logout(self):
+        """Handles the user logout process."""
+        logger.info("Handling user logout request.")
+        if self.dashboard_window:
+            logger.debug("Closing dashboard window.")
+            self.dashboard_window.close()
+            self.dashboard_window = None
+        
+        self.current_student = None # Clear current student session
+        logger.info("Current student session cleared.")
+        
+        # Return to login window
+        self.show_login_window()
+        logger.info("Logout process complete, login window shown.")
 
 if __name__ == "__main__":
     # Configure logging
