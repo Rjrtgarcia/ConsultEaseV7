@@ -542,7 +542,14 @@ class DashboardWindow(BaseWindow):
         self.status_bar_label.setText(f"Displaying {len(faculty_data_list)} faculty members. Last updated: {time.strftime('%I:%M:%S %p')}")
         
         # Debug logging for faculty card manager state
-        logger.debug(f"Faculty card manager has {len(self.faculty_card_manager.card_pool)} cards in pool")
+        logger.debug(f"Faculty card manager has {len(self.faculty_card_manager.active_cards)} active cards")
+        
+        # Get component pool stats if available
+        try:
+            pool_stats = self.faculty_card_manager.get_stats()
+            logger.debug(f"Faculty card manager stats: {pool_stats}")
+        except Exception as e:
+            logger.debug(f"Could not get faculty card manager stats: {e}")
 
     def show_consultation_form_safe(self, faculty_data: dict):
         """
