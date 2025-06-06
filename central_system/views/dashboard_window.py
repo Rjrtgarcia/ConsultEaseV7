@@ -8,6 +8,7 @@ from PyQt5.QtGui import QPixmap, QIcon
 import os
 import logging
 import time
+import threading
 import hashlib  # Added for hash calculation
 from .base_window import BaseWindow
 from .consultation_panel import ConsultationPanel
@@ -391,6 +392,12 @@ class DashboardWindow(BaseWindow):
         refresh_button.setStyleSheet("font-size: 11pt; padding: 8px 12px; background-color: #1976D2; color: white; border-radius: 5px;")
         refresh_button.clicked.connect(self.request_background_faculty_refresh) # Changed to request background refresh
         filter_search_layout.addWidget(refresh_button)
+        
+        # Debug test button for MQTT real-time updates
+        test_button = QPushButton("Test MQTT")
+        test_button.setStyleSheet("font-size: 11pt; padding: 8px 12px; background-color: #FF9800; color: white; border-radius: 5px;")
+        test_button.clicked.connect(self._test_mqtt_updates)
+        filter_search_layout.addWidget(test_button)
 
         faculty_grid_layout.addWidget(filter_search_widget)
         
@@ -533,6 +540,9 @@ class DashboardWindow(BaseWindow):
         logger.info("Faculty grid population complete.")
         self._scroll_faculty_to_top()
         self.status_bar_label.setText(f"Displaying {len(faculty_data_list)} faculty members. Last updated: {time.strftime('%I:%M:%S %p')}")
+        
+        # Debug logging for faculty card manager state
+        logger.debug(f"Faculty card manager has {len(self.faculty_card_manager.card_pool)} cards in pool")
 
     def show_consultation_form_safe(self, faculty_data: dict):
         """
@@ -1352,6 +1362,11 @@ class DashboardWindow(BaseWindow):
         """
         # Add debugging to confirm this method is being called
         logger.info(f"🔥🔥🔥 DASHBOARD handle_realtime_status_update CALLED - Topic: {topic}, Data: {data}")
+        logger.info(f"🔥🔥🔥 DASHBOARD Data type: {type(data)}")
+        
+        # Additional debug info
+        logger.info(f"🔥🔥🔥 DASHBOARD Current thread: {threading.current_thread().name}")
+        logger.info(f"🔥🔥🔥 DASHBOARD Faculty card manager available: {hasattr(self, 'faculty_card_manager') and self.faculty_card_manager is not None}")
         
         # Schedule the actual processing in the main thread to prevent Qt threading violations
         QTimer.singleShot(0, lambda: self._process_realtime_status_update(topic, data))
@@ -1385,8 +1400,21 @@ class DashboardWindow(BaseWindow):
                         else: # Not present or no 'present' field
                             new_status_str = "offline"
                         
-                        logger.info(f"Updating faculty card {faculty_id} to status: {new_status_str} based on payload: {data}")
-                        self.faculty_card_manager.update_faculty_status(faculty_id, new_status_str)
+                        logger.info(f"🔄 Updating faculty card {faculty_id} to status: {new_status_str} based on payload: {data}")
+                        
+                        # Debug: Check if faculty card manager is available
+                        if hasattr(self, 'faculty_card_manager') and self.faculty_card_manager:
+                            self.faculty_card_manager.update_faculty_status(faculty_id, new_status_str)
+                            logger.info(f"🔄 Faculty card manager update called for faculty {faculty_id}")
+                            
+                            # Check if the faculty is in active cards
+                            if faculty_id in self.faculty_card_manager.active_cards:
+                                logger.info(f"🔄 Faculty {faculty_id} found in active cards")
+                            else:
+                                logger.warning(f"🔄 Faculty {faculty_id} NOT found in active cards")
+                        else:
+                            logger.error("🔄 Faculty card manager not available for update")
+                        
                         self.status_bar_label.setText(f"Faculty {faculty_id} status updated to {new_status_str}. ({time.strftime('%I:%M:%S %p')})")
                         # No full refresh needed here, individual card is updated.
 
@@ -1402,8 +1430,21 @@ class DashboardWindow(BaseWindow):
                             logger.warning(f"Unknown string status for faculty {faculty_id}: {data}")
                             new_status_str = "offline" # Default for unknown string
                         
-                        logger.info(f"Updating faculty card {faculty_id} to status: {new_status_str} based on string payload: {data}")
-                        self.faculty_card_manager.update_faculty_status(faculty_id, new_status_str)
+                        logger.info(f"🔄 Updating faculty card {faculty_id} to status: {new_status_str} based on string payload: {data}")
+                        
+                        # Debug: Check if faculty card manager is available
+                        if hasattr(self, 'faculty_card_manager') and self.faculty_card_manager:
+                            self.faculty_card_manager.update_faculty_status(faculty_id, new_status_str)
+                            logger.info(f"🔄 Faculty card manager update called for faculty {faculty_id}")
+                            
+                            # Check if the faculty is in active cards
+                            if faculty_id in self.faculty_card_manager.active_cards:
+                                logger.info(f"🔄 Faculty {faculty_id} found in active cards")
+                            else:
+                                logger.warning(f"🔄 Faculty {faculty_id} NOT found in active cards")
+                        else:
+                            logger.error("🔄 Faculty card manager not available for update")
+                        
                         self.status_bar_label.setText(f"Faculty {faculty_id} status updated to {new_status_str}. ({time.strftime('%I:%M:%S %p')})")
 
                     else:
@@ -1460,6 +1501,56 @@ class DashboardWindow(BaseWindow):
         # Schedule a new refresh after a short delay
         self._refresh_debounce_timer.start(500)  # 500ms debounce
         logger.info(f"🔥🔥🔥 _debounced_refresh scheduled refresh in 500ms")
+
+    def _test_mqtt_updates(self):
+        """Test MQTT real-time updates functionality."""
+        try:
+            logger.info("🧪 Testing MQTT real-time updates from dashboard")
+            
+            # Import the test publisher
+            from ..utils.mqtt_test_publisher import MQTTTestPublisher
+            
+            publisher = MQTTTestPublisher()
+            
+            # Test a few faculty status updates
+            test_results = []
+            
+            # Test making faculty 1 available
+            result1 = publisher.test_faculty_status_update(1, "available")
+            test_results.append(result1)
+            
+            # Test making faculty 2 busy
+            result2 = publisher.test_faculty_status_update(2, "busy")
+            test_results.append(result2)
+            
+            # Test making faculty 3 offline
+            result3 = publisher.test_faculty_status_update(3, "offline")
+            test_results.append(result3)
+            
+            # Test system notification
+            result4 = publisher.test_system_notification("MQTT test triggered from dashboard")
+            test_results.append(result4)
+            
+            successful_tests = sum(test_results)
+            total_tests = len(test_results)
+            
+            # Update status bar with test results
+            self.status_bar_label.setText(f"🧪 MQTT Test: {successful_tests}/{total_tests} successful. Check logs for details.")
+            
+            # Show notification
+            if successful_tests == total_tests:
+                self.show_notification("MQTT test completed successfully! Check faculty cards for updates.", "success")
+            else:
+                self.show_notification(f"MQTT test partially successful: {successful_tests}/{total_tests}", "warning")
+                
+            logger.info(f"🧪 MQTT test completed: {successful_tests}/{total_tests} successful")
+            
+        except Exception as e:
+            logger.error(f"🧪 Error during MQTT test: {e}")
+            import traceback
+            logger.error(f"🧪 Traceback: {traceback.format_exc()}")
+            self.status_bar_label.setText("❌ MQTT test failed. Check logs for details.")
+            self.show_notification("MQTT test failed. Check logs for details.", "error")
 
     def _request_logout(self): # ✅ ADDED: Method to emit logout signal
         """Emits the logout_requested signal."""
