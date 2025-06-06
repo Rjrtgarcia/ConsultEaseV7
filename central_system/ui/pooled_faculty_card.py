@@ -50,19 +50,9 @@ class PooledFacultyCard(QWidget):
     def _setup_ui(self):
         """Setup the user interface."""
         # Main layout
-        self.setFixedSize(280, 120)  # Optimized size for touch interface
-        self.setStyleSheet("""
-            PooledFacultyCard {
-                background-color: white;
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                margin: 4px;
-            }
-            PooledFacultyCard:hover {
-                border-color: #2196F3;
-                background-color: #f5f5f5;
-            }
-        """)
+        self.setFixedSize(280, 140)  # Increased height for better touch interface
+        # Remove inline styling to allow theme styling to take effect
+        self.setObjectName("faculty_card_unavailable")  # Default state
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -75,26 +65,21 @@ class PooledFacultyCard(QWidget):
 
         # Faculty name label
         self.name_label = QLabel()
-        self.name_label.setFont(QFont("Arial", 11, QFont.Bold))
-        self.name_label.setStyleSheet("color: #333333;")
+        self.name_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
         self.name_label.setWordWrap(True)
         header_layout.addWidget(self.name_label, 1)
 
         # Status indicator
         self.status_widget = QWidget()
-        self.status_widget.setFixedSize(12, 12)
-        self.status_widget.setStyleSheet("""
-            background-color: #cccccc;
-            border-radius: 6px;
-        """)
+        self.status_widget.setFixedSize(16, 16)
+        self.status_widget.setStyleSheet("background-color: #cccccc; border-radius: 8px;")
         header_layout.addWidget(self.status_widget, 0, Qt.AlignTop)
 
         main_layout.addLayout(header_layout)
 
         # Department label
         self.department_label = QLabel()
-        self.department_label.setFont(QFont("Arial", 9))
-        self.department_label.setStyleSheet("color: #666666;")
+        self.department_label.setFont(QFont("Segoe UI", 10))
         main_layout.addWidget(self.department_label)
 
         # Spacer
@@ -102,27 +87,10 @@ class PooledFacultyCard(QWidget):
 
         # Consult button
         self.consult_button = QPushButton("Request Consultation")
-        self.consult_button.setFont(QFont("Arial", 9))
-        self.consult_button.setFixedHeight(28)
-        self.consult_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 4px 8px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #0D47A1;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.consult_button.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.consult_button.setFixedHeight(36)
+        # Use theme-based button styling instead of inline styles
+        self.consult_button.setObjectName("consultButton")
         self.consult_button.clicked.connect(self._on_consult_clicked)
         main_layout.addWidget(self.consult_button)
 
@@ -176,6 +144,15 @@ class PooledFacultyCard(QWidget):
             status = 'offline'
         
         self._update_status_indicator(status)
+        
+        # Update card styling based on availability using theme object names
+        if status.lower() == 'available':
+            self.setObjectName("faculty_card_available")
+        else:
+            self.setObjectName("faculty_card_unavailable")
+        
+        # Force style refresh
+        self.setStyleSheet(self.styleSheet())
 
         # Update button state - check for availability
         # Handle both 'available' field and converted status
@@ -208,18 +185,15 @@ class PooledFacultyCard(QWidget):
                 status = str(status).lower() if status else 'offline'
         
         status_colors = {
-            'available': '#4CAF50',    # Green
-            'busy': '#FF9800',         # Orange
-            'offline': '#9E9E9E',      # Gray
-            'unavailable': '#9E9E9E',  # Gray
-            'in_consultation': '#F44336'  # Red
+            'available': '#27ae60',      # Success green from theme
+            'busy': '#f39c12',           # Warning orange from theme  
+            'offline': '#95a5a6',        # Secondary gray from theme
+            'unavailable': '#95a5a6',    # Secondary gray from theme
+            'in_consultation': '#e74c3c' # Error red from theme
         }
 
-        color = status_colors.get(status.lower(), '#9E9E9E')
-        self.status_widget.setStyleSheet(f"""
-            background-color: {color};
-            border-radius: 6px;
-        """)
+        color = status_colors.get(status.lower(), '#95a5a6')
+        self.status_widget.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
 
     def _on_consult_clicked(self):
         """Handle consultation button click."""
@@ -259,10 +233,13 @@ class PooledFacultyCard(QWidget):
         self.consult_button.setEnabled(True)
 
         # Reset status indicator
-        self.status_widget.setStyleSheet("""
-            background-color: #cccccc;
-            border-radius: 6px;
-        """)
+        self.status_widget.setStyleSheet("background-color: #cccccc; border-radius: 8px;")
+
+        # Reset to default object name for theme styling
+        self.setObjectName("faculty_card_unavailable")
+        
+        # Force style refresh
+        self.setStyleSheet(self.styleSheet())
 
         # Disconnect signals
         try:
@@ -300,6 +277,15 @@ class PooledFacultyCard(QWidget):
                 self.faculty_data['available'] = False
             
             self._update_status_indicator(status_str)
+            
+            # Update card styling based on availability using theme object names
+            if status_str.lower() == 'available':
+                self.setObjectName("faculty_card_available")
+            else:
+                self.setObjectName("faculty_card_unavailable")
+            
+            # Force style refresh
+            self.setStyleSheet(self.styleSheet())
 
             # Update button state
             is_available = self.faculty_data.get('available', False)

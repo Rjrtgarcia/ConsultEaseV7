@@ -276,28 +276,53 @@ class ConsultEaseTheme:
                 padding: {cls.PADDING_SMALL}px;
             }}
 
-            /* Faculty Card Styling - Improved according to user preferences */
-            QFrame#faculty_card_available {{
-                background-color: #f8fff9;
-                border: 1px solid {cls.SUCCESS_COLOR};
+            /* Faculty Card Styling - Modern design with proper theming */
+            QWidget#faculty_card_available {{
+                background-color: #ffffff;
+                border: 2px solid {cls.SUCCESS_COLOR};
                 border-radius: {cls.BORDER_RADIUS_LARGE}px;
-                margin: 8px;
+                margin: 4px;
                 padding: {cls.PADDING_NORMAL}px;
             }}
 
-            QFrame#faculty_card_unavailable {{
-                background-color: #fff8f8;
-                border: 1px solid {cls.ERROR_COLOR};
+            QWidget#faculty_card_unavailable {{
+                background-color: #ffffff;
+                border: 2px solid {cls.SECONDARY_COLOR};
                 border-radius: {cls.BORDER_RADIUS_LARGE}px;
-                margin: 8px;
+                margin: 4px;
                 padding: {cls.PADDING_NORMAL}px;
             }}
 
             /* Faculty Card Text Elements - No borders as per user preference */
-            QFrame#faculty_card_available QLabel,
-            QFrame#faculty_card_unavailable QLabel {{
+            QWidget#faculty_card_available QLabel,
+            QWidget#faculty_card_unavailable QLabel {{
                 border: none;
                 background: transparent;
+                color: {cls.TEXT_PRIMARY};
+            }}
+            
+            /* Faculty Card Buttons */
+            QPushButton#consultButton {{
+                background-color: {cls.PRIMARY_COLOR};
+                color: {cls.TEXT_LIGHT};
+                border: none;
+                border-radius: {cls.BORDER_RADIUS_NORMAL}px;
+                font-weight: bold;
+                padding: 8px 12px;
+                min-height: {cls.TOUCH_MIN_HEIGHT}px;
+            }}
+            
+            QPushButton#consultButton:hover {{
+                background-color: #1a4b7c;
+            }}
+            
+            QPushButton#consultButton:pressed {{
+                background-color: #0a2d4d;
+            }}
+            
+            QPushButton#consultButton:disabled {{
+                background-color: {cls.SECONDARY_COLOR};
+                color: {cls.TEXT_SECONDARY};
             }}
         """
 

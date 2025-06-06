@@ -551,6 +551,30 @@ class FacultyController:
             logger.error(f"Error getting faculty by BLE ID: {str(e)}")
             return None
 
+    def get_faculty_by_email(self, email):
+        """
+        Get a faculty member by email address.
+
+        Args:
+            email (str): Faculty email address
+
+        Returns:
+            Faculty: Faculty object or None if not found
+        """
+        try:
+            db = get_db()
+            faculty = db.query(Faculty).filter(Faculty.email == email).first()
+
+            if faculty:
+                logger.debug(f"Found faculty with email {email}: {faculty.name} (ID: {faculty.id})")
+            else:
+                logger.debug(f"No faculty found with email: {email}")
+
+            return faculty
+        except Exception as e:
+            logger.error(f"Error getting faculty by email: {str(e)}")
+            return None
+
     def add_faculty(self, name, department, email, ble_id, image_path=None, always_available=False):
         """
         Add a new faculty member with comprehensive input validation.

@@ -445,6 +445,14 @@ class DashboardWindow(BaseWindow):
         """Set the faculty controller and perform initial setup requiring it."""
         logger.info("DashboardWindow: Faculty controller set.")
         self.faculty_controller = controller
+        
+        # Ensure sample data exists for demo purposes
+        try:
+            from ..utils.sample_data import ensure_sample_data_exists
+            ensure_sample_data_exists(self.faculty_controller)
+        except Exception as e:
+            logger.warning(f"Could not ensure sample data: {e}")
+        
         # Now that controller is set, setup MQTT and load initial data
         self.setup_realtime_updates()
         self._perform_initial_faculty_load()
@@ -964,18 +972,20 @@ class DashboardWindow(BaseWindow):
             self._show_error_message("Faculty controller not set. Please restart the application.")
             return
 
-        if self._faculty_fetch_thread and self._faculty_fetch_thread.isRunning():
+        # Safe check for running thread to avoid RuntimeError
+        if self._is_thread_running_safely(self._faculty_fetch_thread):
             logger.warning("Faculty fetch operation already in progress. Skipping new request.")
             self.status_bar_label.setText("⏳ Refresh already in progress.")
             return
 
         self._show_loading_indicator() # Show non-modal loading message
 
-        # Clean up any existing thread
-        if self._faculty_fetch_thread and self._faculty_fetch_thread.isRunning():
-             self._faculty_fetcher.stop() # Request previous to stop
-             self._faculty_fetch_thread.quit()
-             self._faculty_fetch_thread.wait(1000) # Wait a bit
+        # Clean up any existing thread with safe checks
+        if self._is_thread_running_safely(self._faculty_fetch_thread):
+            if self._faculty_fetcher:
+                self._faculty_fetcher.stop() # Request previous to stop
+            self._faculty_fetch_thread.quit()
+            self._faculty_fetch_thread.wait(1000) # Wait a bit
 
         try:
             self._faculty_fetch_thread = QThread(self)
@@ -1216,11 +1226,60 @@ class DashboardWindow(BaseWindow):
         # Save splitter state before closing
         self.save_splitter_state()
 
+        # Clean up background threads
+        self._cleanup_background_threads()
+
         # Unsubscribe from MQTT topics
         self.cleanup_realtime_updates()
 
         # Call parent close event
         super().closeEvent(event)
+
+    def _cleanup_background_threads(self):
+        """
+        Safely clean up background threads to prevent RuntimeError on close.
+        """
+        try:
+            # Stop any running timers
+            if hasattr(self, 'refresh_timer') and self.refresh_timer.isActive():
+                self.refresh_timer.stop()
+                
+            if hasattr(self, '_refresh_debounce_timer') and self._refresh_debounce_timer.isActive():
+                self._refresh_debounce_timer.stop()
+
+            # Clean up faculty fetch thread
+            if self._faculty_fetcher:
+                self._faculty_fetcher.stop()
+                
+            if self._faculty_fetch_thread:
+                if self._is_thread_running_safely(self._faculty_fetch_thread):
+                    self._faculty_fetch_thread.quit()
+                    self._faculty_fetch_thread.wait(2000)  # Wait up to 2 seconds
+                self._faculty_fetch_thread = None
+                self._faculty_fetcher = None
+                    
+            logger.info("Background threads cleaned up successfully")
+        except Exception as e:
+            logger.error(f"Error during thread cleanup: {e}")
+
+    def _is_thread_running_safely(self, thread):
+        """
+        Safely check if a thread is running without raising RuntimeError.
+        
+        Args:
+            thread: QThread object to check
+            
+        Returns:
+            bool: True if thread is running, False otherwise
+        """
+        if not thread:
+            return False
+            
+        try:
+            return thread.isRunning()
+        except RuntimeError:
+            # Thread object was deleted
+            return False
 
     def setup_realtime_updates(self):
         """
